@@ -132,7 +132,7 @@ sys.path.insert(0, str(kair))
 from models.network_unet import UNetRes  # noqa: E402
 mp = lisamallit.varmista("kohina")
 verkko = UNetRes(in_nc=4, out_nc=3, nc=[64, 128, 256, 512], nb=4, act_mode="R",
-                 downsample_mode="strideconv", upsample_mode="convtranspose")
+                 downsample_mode="strideconv", upsample_mode="convtranspose", bias=False)
 verkko.load_state_dict(torch.load(mp, map_location="cpu"), strict=True)
 verkko.eval()
 sd = kuva.lataa_pth(mp)
