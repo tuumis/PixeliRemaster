@@ -24,6 +24,20 @@ LUETTELO = {
         "lahde": "https://github.com/cszn/KAIR/releases/download/v1.0/drunet_color.pth",
         "kuvaus": "DRUNet (Kai Zhang ym., KAIR), MIT",
     },
+    "kasvot": {
+        "tiedosto": "GFPGANv1.4.pth",
+        "koko": 348632874,
+        "sha256": "e2cd4703ab14f4d01fd1383a8a8b266f9a5833dacee8e6a79d3bf21a1b6be5ad",
+        "lahde": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
+        "kuvaus": "GFPGAN v1.4 (Tencent ARC), Apache 2.0",
+    },
+    "tunnistin": {
+        "tiedosto": "detection_Resnet50_Final.pth",
+        "koko": 109497761,
+        "sha256": "6d1de9c2944f2ccddca5f5e010ea5ae64a39845a86311af6fdf30841b0a5a16d",
+        "lahde": "https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth",
+        "kuvaus": "RetinaFace ResNet-50 (facexlib, Xintao Wang), MIT",
+    },
 }
 
 KANSIO = m.DATA / "mallit"

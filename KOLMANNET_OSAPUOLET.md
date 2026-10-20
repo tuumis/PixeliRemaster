@@ -10,6 +10,9 @@
 
 | drunet_color.pth (kohinanpoisto / denoising) | Kai Zhang ym. (KAIR) | MIT | https://github.com/cszn/KAIR – ladataan ensimmäisellä käynnistyksellä / downloaded on first launch |
 
+| GFPGANv1.4.pth (kasvojen palautus / face restoration) | Tencent ARC (GFPGAN) | Apache 2.0 (arkkitehtuuri: GFPGANv1Clean, ilman NVIDIA-lisenssin CUDA-osia / without the NVIDIA-licensed CUDA ops) | https://github.com/TencentARC/GFPGAN – ladataan ensimmäisellä käytöllä / downloaded on first use |
+| detection_Resnet50_Final.pth (kasvojen tunnistus / face detection) | Xintao Wang (facexlib), RetinaFace | MIT | https://github.com/xinntao/facexlib – ladataan ensimmäisellä käytöllä / downloaded on first use |
+
 Malleja ei ole muokattu. / The models are unmodified.
 
 Mallien arkkitehtuurit (SPAN, RealPLKSR) on toteutettu uudelleen tiedostossa `app/pixeli/kuva.py` alkuperäisten julkaisujen ja spandrel-kirjaston (MIT) perusteella, ja toteutus on tarkistettu mallien ONNX-vientejä vastaan.

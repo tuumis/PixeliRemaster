@@ -58,9 +58,9 @@ ASETUKSET = {
     4: {"malli": "vhs", "ai": 1.0, "rae": 0.35},                                 # VHS / pehmeä
     5: {"malli": "ani", "ai": 1.0},                                              # piirretty
 }
-SAATO_AVAIMET = ("ai", "rae", "halo", "halo_r", "rae_koko", "kohina")
+SAATO_AVAIMET = ("ai", "rae", "halo", "halo_r", "rae_koko", "kohina", "kasvot")
 SAATO_RAJAT = {"ai": (0.0, 1.0), "rae": (0.0, 1.5), "halo": (0.0, 1.5), "halo_r": (1.0, 4.0), "rae_koko": (0.3, 2.0),
-               "kohina": (0.0, 1.5)}
+               "kohina": (0.0, 1.5), "kasvot": (0.0, 1.0)}
 
 TUNNETUT_SUHTEET = [(4 / 3, "4:3"), (1.37, "1.37"), (1.5, "3:2"), (1.66, "1.66"), (16 / 9, "16:9"),
                     (1.85, "1.85"), (2.0, "2:1"), (2.2, "2.20"), (2.35, "2.35"), (2.39, "2.39")]
@@ -848,6 +848,24 @@ class Laite:
         if float(a.get("kohina", 0) or 0) > 0:
             a["kohinamalli"] = self.kohinamalli()
         return a
+
+    def kasvomallit(self):
+        """(tunnistin, GFPGAN); ladataan ensimmäisellä käytöllä (noin 460 Mt). GFPGAN lasketaan fp32:na."""
+        if "kasvot" not in self._mallit:
+            from . import kasvot, lisamallit
+            T = kasvot.Tunnistin(self.ops, kuva.lataa_pth(lisamallit.varmista("tunnistin")))
+            G = kasvot.GFPGAN(self.ops, kuva.lataa_pth(lisamallit.varmista("kasvot")))
+            self._mallit["kasvot"] = (T, G)
+        return self._mallit["kasvot"]
+
+    def palauta_kasvot(self, lahde_u8, tulos_u8, voimakkuus):
+        """Kasvojen palautus valmiiseen kuvaan (paikallaan), jos voimakkuus > 0."""
+        if not voimakkuus or float(voimakkuus) <= 0:
+            return 0
+        from . import kasvot
+        T, G = self.kasvomallit()
+        with self.inferenssi():
+            return kasvot.palauta(self.ops, T, G, np.ascontiguousarray(lahde_u8), tulos_u8, float(voimakkuus))
 
     def kohinamalli(self):
         if "kohina" not in self._mallit:

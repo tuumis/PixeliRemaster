@@ -149,4 +149,55 @@ for (hh, ww) in ((48, 64), (37, 50)):
     e1, e2 = float(np.abs(oma_t - viite).max()), float(np.abs(oma_n - viite).max())
     print(f"::notice title=torchtesti::DRUNet {hh}x{ww}: torch {e1:.2e}, numpy {e2:.2e} (KAIR)")
     assert e1 < 1e-4 and e2 < 1e-4, (e1, e2)
+# 6) kasvojen palautus: RetinaFace (facexlib) ja GFPGAN v1.4 (clean) vastaavat alkuperäisiä
+import types  # noqa: E402
+from pixeli import kasvot as kv2  # noqa: E402
+torch.set_grad_enabled(False)
+# RetinaFace: verkon raakatulokset ja koko tunnistus (matala kynnys, jotta purku ja NMS tulevat testatuiksi)
+from facexlib.detection.retinaface import RetinaFace  # noqa: E402
+tp = lisamallit.varmista("tunnistin")
+rf = RetinaFace(network_name="resnet50", half=False, device=torch.device("cpu"))
+sd_t = torch.load(tp, map_location="cpu")
+rf.load_state_dict({(k[7:] if k.startswith("module.") else k): v for k, v in sd_t.items()}, strict=True)
+rf.eval()
+rng = np.random.default_rng(7)
+kuva_t = (m.testikuva(96, 128)[0].transpose(1, 2, 0) * 255).astype(np.uint8)
+kuva_t[20:70, 40:90] = rng.integers(0, 255, (50, 50, 3))
+sd_np = kuva.lataa_pth(tp)
+for nimi_, ops_ in (("torch", ot), ("numpy", on)):
+    T = kv2.Tunnistin(ops_, sd_np)
+    x_in = torch.from_numpy(np.ascontiguousarray(kuva_t[:, :, ::-1].astype(np.float32) - T.KESKIARVO).transpose(2, 0, 1))[None]
+    l0, c0, m0 = rf(x_in)
+    l1, c1, m1 = T._verkko(ops_.tensor(x_in.numpy()))
+    e = max(float(np.abs(l0[0].numpy() - l1).max()), float(np.abs(m0[0].numpy() - m1).max()))
+    p0 = rf.detect_faces(kuva_t[:, :, ::-1].copy(), conf_threshold=0.02)
+    p1 = T.tunnista(kuva_t, kynnys=0.02)
+    print(f"::notice title=torchtesti::RetinaFace {nimi_}: verkko {e:.2e}, tunnistuksia {len(p0)}/{len(p1)}")
+    assert e < 2e-3, e
+    assert len(p0) == len(p1) and (len(p0) == 0 or float(np.abs(p0 - p1).max()) < 0.05), (p0[:3], p1[:3])
+# GFPGAN: alkuperäiset arkkitehtuuritiedostot (basicsr-riippuvuudet korvattu tyngillä)
+gfp = Path(tempfile.mkdtemp(prefix="gfpgan_"))
+subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/TencentARC/GFPGAN", str(gfp / "repo")], check=True)
+for mod in ("basicsr", "basicsr.utils", "basicsr.utils.registry", "basicsr.archs", "basicsr.archs.arch_util"):
+    sys.modules[mod] = types.ModuleType(mod)
+sys.modules["basicsr.utils.registry"].ARCH_REGISTRY = types.SimpleNamespace(register=lambda *a, **k: (lambda c: c))
+sys.modules["basicsr.archs.arch_util"].default_init_weights = lambda *a, **k: None
+for f in ("stylegan2_clean_arch.py", "gfpganv1_clean_arch.py"):
+    koodi = (gfp / "repo" / "gfpgan" / "archs" / f).read_text(encoding="utf-8")
+    (gfp / f).write_text(koodi.replace("from .stylegan2_clean_arch", "from stylegan2_clean_arch"), encoding="utf-8")
+sys.path.insert(0, str(gfp))
+from gfpganv1_clean_arch import GFPGANv1Clean  # noqa: E402
+gp = lisamallit.varmista("kasvot")
+verkko_g = GFPGANv1Clean(out_size=512, num_style_feat=512, channel_multiplier=2, decoder_load_path=None,
+                         fix_decoder=False, num_mlp=8, input_is_latent=True, different_w=True, narrow=1, sft_half=True)
+sd_g = torch.load(gp, map_location="cpu")
+verkko_g.load_state_dict(sd_g["params_ema"] if "params_ema" in sd_g else sd_g, strict=True)
+verkko_g.eval()
+xg = (np.clip(m.testikuva(512, 512), 0, 1) - 0.5) / 0.5
+viite_g = verkko_g(torch.from_numpy(xg), return_rgb=False, randomize_noise=False)[0].numpy()
+G = kv2.GFPGAN(ot, kuva.lataa_pth(gp))
+oma_g = ot.numpy(G(ot.tensor(xg)))
+eg = float(np.abs(oma_g - viite_g).max())
+print(f"::notice title=torchtesti::GFPGAN v1.4 torch: suurin ero {eg:.2e} (alkuperäinen)")
+assert eg < 2e-3, eg
 print("TORCHTESTI OK")

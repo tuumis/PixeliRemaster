@@ -230,7 +230,9 @@ function nakyma(id) {
 function oletusSaato(n, x) {
   const e = ((onKuva(x) ? TILA.esiasetukset_kuva : TILA.esiasetukset) || {})[String(n)] || {};
   const o = (x && x.koe && x.koe.oletukset && x.koe.oletukset[String(n)]) || {};
-  return {ai: o.ai ?? e.ai, rae: o.rae ?? (e.rae || 0), halo: o.halo ?? (e.halo || 0), kohina: o.kohina ?? (e.kohina || 0)};
+  const s = {ai: o.ai ?? e.ai, rae: o.rae ?? (e.rae || 0), halo: o.halo ?? (e.halo || 0), kohina: o.kohina ?? (e.kohina || 0)};
+  if (onKuva(x)) s.kasvot = 0;
+  return s;
 }
 function kohtienMaara(x) { return onKuva(x) ? ((x.koe && x.koe.alueet) || [1]).length : 3; }
 function nykyinenAsetus(x) { return Number((x.valinta || {}).asetus || (x.analyysi || {}).suositus || 2); }
@@ -491,7 +493,9 @@ function paneeliHtml(x, n, muokattava) {
   const saadot = `<div class="osio saadot"><div class="osio-otsikko"><h3>${t("saato.otsikko")}</h3>
       <button type="button" class="linkki" id="palauta" ${muokattava ? "" : "disabled"}>${t("saato.palauta")}</button></div>
       ${x.koe && x.koe.oletukset ? `<p class="selite sovitettu">${t("saato.sovitettu")}</p>` : ""}
-      ${liuku("kohina", s.kohina ?? 0, 1.5, aiKaytossa)}${liuku("ai", s.ai ?? 1, 1, aiKaytossa)}${liuku("halo", s.halo, 1.5)}${liuku(onKuva(x) ? "rae_kuva" : "rae", s.rae, 1.5)}</div>`;
+      ${liuku("kohina", s.kohina ?? 0, 1.5, aiKaytossa)}${liuku("ai", s.ai ?? 1, 1, aiKaytossa)}${liuku("halo", s.halo, 1.5)}${liuku(onKuva(x) ? "rae_kuva" : "rae", s.rae, 1.5)}
+      ${onKuva(x) ? liuku("kasvot", s.kasvot ?? 0, 1) + `<p class="selite saato-selite">${t("saato.kasvot_selite")}</p>` : ""}
+      <p class="selite mallilataus" id="mallilataus" hidden></p></div>`;
   const asetukset = `<div class="osio"><h3>${t("asetus.otsikko")}</h3><div class="esivalinnat" id="esivalinnat">${esivalinnat}</div></div>`;
   // muut saman lajin käsittelemättömät tiedostot: asetukset voi kopioida kerralla kaikkiin
   const muita = TILA.jono.tyot.filter(y => y.id !== x.id && y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)
@@ -519,7 +523,7 @@ function toimintoHtml(x) {
 /* ------------------------------------------------------------ vertailun kuvat */
 function saatoPoikkeaa(x, n, s) {
   const o = oletusSaato(n, x);
-  return ["ai", "rae", "halo", "kohina"].some(k => o[k] != null && s[k] != null && Math.abs(o[k] - s[k]) > 0.001);
+  return ["ai", "rae", "halo", "kohina", "kasvot"].some(k => o[k] != null && s[k] != null && Math.abs(o[k] - s[k]) > 0.001);
 }
 let saatoAjastin = null;
 function paivitaKuvat(x, viive = 0) {
@@ -700,6 +704,13 @@ async function tallennaSaato(id) {
 
 let liikeOdottaa = null;
 function paivitaDynaamiset(x) {
+  // lisämallin lataus (esim. kasvomallit ensimmäisellä käytöllä)
+  const ml = $("#mallilataus");
+  if (ml) {
+    const l = Object.values(TILA.mallit || {}).map(m => m.lataus).find(l => l && !l.virhe);
+    ml.hidden = !l;
+    if (l) ml.textContent = t("malli.ladataan", {p: luku(100 * l.tehty / Math.max(1, l.koko))});
+  }
   // esikatselun edistyminen
   const kp = $("#koe-palkki");
   if (kp) kp.style.width = `${Math.round(100 * ((x.koe && x.koe.edistys) || 0))}%`;

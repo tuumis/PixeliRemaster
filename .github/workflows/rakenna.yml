@@ -31,7 +31,8 @@ jobs:
       - name: PyTorch- ja kuvatesti
         shell: pwsh
         run: |
-          python -m pip install --disable-pip-version-check -q numpy==2.2.6 pillow pillow-heif torch --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+          python -m pip install --disable-pip-version-check -q numpy==2.2.6 pillow pillow-heif torch torchvision --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+          python -m pip install --disable-pip-version-check -q facexlib opencv-python-headless
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
           python installer/torchtesti.py
           if ($LASTEXITCODE -ne 0) { throw "torchtesti epäonnistui" }

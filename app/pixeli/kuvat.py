@@ -604,7 +604,9 @@ def saatokuva_kuva(src, an, geo, wd, L, n, saato, k):
             ketju = kuva.Ketju(L.ops, alueet[k - 1][3], alueet[k - 1][2], oh, ow, asetus_kuva(L, n, saato, geo),
                                yuv=False)
             rgb = ketju.rgb_lopullinen(L.ops.from_uint8(kuvat[k - 1]), 1000 * k)
-            _tallenna_esikatselu(kd / nimi, kd, k, L.ops.uint8_hwc(rgb))
+            u = L.ops.uint8_hwc(rgb)
+            L.palauta_kasvot(kuvat[k - 1][0], u, (saato or {}).get("kasvot"))
+            _tallenna_esikatselu(kd / nimi, kd, k, u)
             del rgb, ketju
             L.tyhjenna()
     return f"koe_{tun}/{nimi}"
@@ -657,6 +659,9 @@ def kasittele_kuva(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=Non
             del ketju
             tulos = L.ops.uint8_hwc(y)
             del y
+            if float((saato or {}).get("kasvot") or 0) > 0:
+                palaute(osuus_rgb * 0.98)
+                L.palauta_kasvot(rgb, tulos, saato["kasvot"])
             alfa_ulos = None
             if alfa is not None and asetus.get("malli"):
                 a2 = dict(asetus, rae=0.0, halo=0.0)

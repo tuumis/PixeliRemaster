@@ -142,7 +142,9 @@ class NumpyOps:
         return np.asarray(x, dtype=np.float32)
 
     # --- konvoluutio (ristikorrelaatio kuten torch.nn.functional.conv2d)
-    def conv2d(self, x, w, b=None, pad=0):
+    def conv2d(self, x, w, b=None, pad=0, stride=1):
+        if stride > 1:        # referenssi: lasketaan askeleella 1 ja harvennetaan (sama tulos)
+            return self.conv2d(x, w, b, pad)[:, :, ::stride, ::stride]
         n, c, h, ww = x.shape
         o, ci, kh, kw = w.shape
         assert ci == c, (ci, c)
@@ -252,6 +254,29 @@ class NumpyOps:
     def relu(self, x):
         return np.maximum(x, 0)
 
+    def leaky(self, x, a):
+        return np.where(x >= 0, x, x * np.float32(a))
+
+    def maxpool3s2(self, x):
+        """3x3-maksimi, askel 2, täyte 1 (ResNetin alku)."""
+        p = np.pad(x, ((0, 0), (0, 0), (1, 1), (1, 1)), constant_values=-np.inf)
+        h, w = x.shape[2], x.shape[3]
+        oh, ow = (h - 1) // 2 + 1, (w - 1) // 2 + 1
+        return np.max(np.stack([p[:, :, i:i + 2 * oh:2, j:j + 2 * ow:2] for i in range(3) for j in range(3)]), axis=0)
+
+    def lahin(self, x, h, w):
+        """Lähimmän naapurin skaalaus kokoon (h, w) kuten F.interpolate(mode="nearest")."""
+        iy = (np.arange(h) * x.shape[2] / h).astype(np.int64)
+        ix = (np.arange(w) * x.shape[3] / w).astype(np.int64)
+        return x[:, :, iy][:, :, :, ix]
+
+    def linear(self, x, w, b=None):
+        y = x @ w.T
+        return y + b if b is not None else y
+
+    def summa(self, x, akselit):
+        return x.sum(axis=akselit)
+
     def conv_s2(self, x, w):
         """2x2-konvoluutio askeleella 2 (puolittaa koon), ilman biasia."""
         n, c, h, ww = x.shape
@@ -306,11 +331,11 @@ class TorchOps:
     def numpy(self, x):
         return x.detach().float().cpu().numpy()
 
-    def conv2d(self, x, w, b=None, pad=0):
+    def conv2d(self, x, w, b=None, pad=0, stride=1):
         if x.dtype != w.dtype:
             w = w.to(x.dtype)
             b = b.to(x.dtype) if b is not None else None
-        return self.F.conv2d(x, w, b, padding=pad)
+        return self.F.conv2d(x, w, b, padding=pad, stride=stride)
 
     def silu(self, x):
         return self.F.silu(x)
@@ -384,6 +409,21 @@ class TorchOps:
 
     def relu(self, x):
         return self.F.relu(x)
+
+    def leaky(self, x, a):
+        return self.F.leaky_relu(x, a)
+
+    def maxpool3s2(self, x):
+        return self.F.max_pool2d(x, 3, 2, 1)
+
+    def lahin(self, x, h, w):
+        return self.F.interpolate(x, size=[h, w], mode="nearest")
+
+    def linear(self, x, w, b=None):
+        return self.F.linear(x, w.to(x.dtype), b.to(x.dtype) if b is not None else None)
+
+    def summa(self, x, akselit):
+        return x.sum(dim=akselit)
 
     def conv_s2(self, x, w):
         return self.F.conv2d(x, w.to(x.dtype), None, stride=2)
@@ -481,6 +521,22 @@ def skaalausmatriisi(n_in, n_out, suodin="catmullrom", siirto=0.0):
     W = np.zeros((n_out, n_in), np.float64)
     np.add.at(W, (np.repeat(np.arange(n_out), n_tap), np.clip(idx, 0, n_in - 1).ravel()), w.ravel())
     return W.astype(np.float32)
+
+
+def bilineaari_matriisi(n, kerroin):
+    """F.interpolate(mode="bilinear", align_corners=False) yhdessä suunnassa kertoimella 2 tai 0.5."""
+    if kerroin == 2:
+        W = np.zeros((2 * n, n), np.float32)
+        for i in range(n):
+            W[2 * i, i] += 0.75
+            W[2 * i, max(i - 1, 0)] += 0.25
+            W[2 * i + 1, i] += 0.75
+            W[2 * i + 1, min(i + 1, n - 1)] += 0.25
+        return W
+    W = np.zeros((n // 2, n), np.float32)
+    for i in range(n // 2):
+        W[i, 2 * i] = W[i, 2 * i + 1] = 0.5
+    return W
 
 
 def alinaytteistys_matriisit(h, w):

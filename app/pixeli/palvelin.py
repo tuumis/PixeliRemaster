@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import asennus
 from . import kuvat
+from . import lisamallit
 from . import moottori as m
 
 WEB = m.SOVELLUS / "web"
@@ -58,7 +59,7 @@ class Sovellus:
                                  "halo": a.get("halo", 0.0), "kohina": a.get("kohina", 0.0), "malli": a.get("malli")}
             return tulos
         return {"versio": m.VERSIO, "ymparisto": self.ymp.nayta(), "jono": self.jono.tila(),
-                "esiasetukset": esi(False), "esiasetukset_kuva": esi(True),
+                "esiasetukset": esi(False), "esiasetukset_kuva": esi(True), "mallit": lisamallit.tila(),
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
                 "datakansio": str(m.DATA), "aika": time.time()}

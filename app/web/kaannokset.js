@@ -120,6 +120,9 @@ fi: {
 
   "saato.otsikko": "Hienosäätö",
   "saato.kohina": "Kohinanpoisto",
+  "saato.kasvot": "Kasvojen palautus",
+  "saato.kasvot_selite": "Tarkentaa kasvot erillisellä tekoälyllä (GFPGAN). Voimakkaana kasvot voivat näyttää hieman tavallista sileämmiltä. Mallit (460 Mt) ladataan ensimmäisellä käytöllä.",
+  "malli.ladataan": "Ladataan tekoälymallia… {p} %",
   "saato.sovitettu": "Oletukset on sovitettu tämän tiedoston laatuun.",
   "fakta.laatu_lahde": "Lähteen laatu",
   "laatu.kohina.vahainen": "vähän kohinaa",
@@ -374,6 +377,9 @@ en: {
 
   "saato.otsikko": "Fine-tuning",
   "saato.kohina": "Noise removal",
+  "saato.kasvot": "Face restoration",
+  "saato.kasvot_selite": "Sharpens faces with a separate AI (GFPGAN). At high strength faces can look smoother than usual. The models (460 MB) are downloaded on first use.",
+  "malli.ladataan": "Downloading AI model… {p} %",
   "saato.sovitettu": "Defaults are tuned to this file's quality.",
   "fakta.laatu_lahde": "Source quality",
   "laatu.kohina.vahainen": "little noise",
