@@ -57,7 +57,7 @@ def lataa_pth(polku):
             return np.frombuffer(raw, dtype=dt)[:n]
 
     sd = Lukija(zf.open(pkl)).load()
-    for k in ("params_ema", "params", "state_dict"):
+    for k in ("params_ema", "params", "state_dict", "model_state"):
         if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
             sd = sd[k]
     return {k: np.asarray(v, dtype=np.float32) for k, v in sd.items()}
@@ -120,10 +120,19 @@ def _lataa_pth_vanha(polku, DT):
             return {k: ratkaise(v) for k, v in o.items()}
         return o
     sd = ratkaise(rakenne)
-    for k in ("params_ema", "params", "state_dict"):
+    for k in ("params_ema", "params", "state_dict", "model_state"):
         if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
             sd = sd[k]
     return {k: np.asarray(v, dtype=np.float32) for k, v in sd.items()}
+
+
+def erf(x):
+    """erf numpylle: Numerical Recipes erfc-Tšebyšev-approksimaatio (suhteellinen virhe < 1.2e-7)."""
+    z = np.abs(x).astype(np.float64)
+    t = 1.0 / (1.0 + 0.5 * z)
+    r = t * np.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (
+        -0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))))
+    return np.where(x >= 0, 1.0 - r, r - 1.0).astype(np.float32)
 
 
 # ============================================================== ops: numpy
@@ -306,6 +315,90 @@ class NumpyOps:
         """(1,3,h,w) float 0..1 -> (h,w,3) uint8"""
         return (np.clip(x[0], 0, 1).transpose(1, 2, 0) * 255.0 + 0.5).astype(np.uint8)
 
+    # --- kuvien korjaus ja väritys (korjaus.py, vari.py)
+    def pad_ref(self, x, p):
+        return np.pad(x, ((0, 0), (0, 0), (p, p), (p, p)), mode="reflect")
+
+    def blur_s2(self, x):
+        """Antialiasoitu alinäytteistys: [1,2,1]^2/16, heijastava reuna, joka toinen pikseli."""
+        p = np.pad(x, ((0, 0), (0, 0), (1, 1), (1, 1)), mode="reflect")
+        h, w = x.shape[2], x.shape[3]
+        y = (p[:, :, 0:h] + 2 * p[:, :, 1:h + 1] + p[:, :, 2:h + 2]) / 4
+        y = (y[:, :, :, 0:w] + 2 * y[:, :, :, 1:w + 1] + y[:, :, :, 2:w + 2]) / 4
+        return np.ascontiguousarray(y[:, :, ::2, ::2])
+
+    def convT3s2(self, x, w, b):
+        """ConvTranspose2d(k=3, s=2, p=1, output_padding=1); w muotoa (in, out, 3, 3)."""
+        n, c, h, ww = x.shape
+        z = np.zeros((n, c, 2 * h + 2, 2 * ww + 2), x.dtype)
+        z[:, :, 1:2 * h:2, 1:2 * ww:2] = x
+        return self.conv2d(z, np.ascontiguousarray(w.transpose(1, 0, 2, 3)[:, :, ::-1, ::-1]), b, 0)
+
+    def spektri(self, x, w, s, t):
+        """LaMan FourierUnit: rfft2 -> 1x1-konvoluutio (re/im) -> BN -> ReLU -> irfft2."""
+        n, c, h, ww = x.shape
+        f = np.fft.rfft2(x.astype(np.float64), norm="ortho")
+        z = np.stack([f.real, f.imag], axis=2).reshape(n, 2 * c, h, ww // 2 + 1).astype(np.float32)
+        z = self.conv2d(z, w, None, 0) * s.reshape(1, -1, 1, 1) + t.reshape(1, -1, 1, 1)
+        z = np.maximum(z, 0).reshape(n, -1, 2, h, ww // 2 + 1)
+        return np.fft.irfft2(z[:, :, 0] + 1j * z[:, :, 1], s=(h, ww), norm="ortho").astype(np.float32)
+
+    def dwconv7(self, x, w, b):
+        n, c, h, ww = x.shape
+        p = np.pad(x, ((0, 0), (0, 0), (3, 3), (3, 3)))
+        out = np.zeros_like(x)
+        for i in range(7):
+            for j in range(7):
+                out += p[:, :, i:i + h, j:j + ww] * w[:, 0, i, j].reshape(1, -1, 1, 1)
+        return out + b.reshape(1, -1, 1, 1)
+
+    def patch_conv(self, x, w, b, k):
+        n, c, h, ww = x.shape
+        t = x.reshape(n, c, h // k, k, ww // k, k)
+        return (np.einsum("ocij,nchiwj->nohw", w, t, optimize=True) + b.reshape(1, -1, 1, 1)).astype(np.float32)
+
+    def ln_c(self, x, w, b, eps=1e-6):
+        u = x.mean(1, keepdims=True)
+        s = ((x - u) ** 2).mean(1, keepdims=True)
+        return (x - u) / np.sqrt(s + eps) * w.reshape(1, -1, 1, 1) + b.reshape(1, -1, 1, 1)
+
+    def ln_last(self, x, w, b, eps):
+        u = x.mean(-1, keepdims=True)
+        s = ((x - u) ** 2).mean(-1, keepdims=True)
+        return (x - u) / np.sqrt(s + eps) * w + b
+
+    def gelu(self, x):
+        return 0.5 * x * (1.0 + erf(x / math.sqrt(2.0)))
+
+    def softmax(self, x):
+        e = np.exp(x - x.max(-1, keepdims=True))
+        return e / e.sum(-1, keepdims=True)
+
+    def kanavat_viimeiseksi(self, x):
+        return np.ascontiguousarray(x.transpose(0, 2, 3, 1))
+
+    def kanavat_ensin(self, x):
+        return np.ascontiguousarray(x.transpose(0, 3, 1, 2))
+
+    def matmul(self, a, b):
+        return np.matmul(a, b)
+
+    def transpose_last(self, x):
+        return np.swapaxes(x, -1, -2)
+
+    def paat(self, x, h):
+        """(L, E) -> (h, L, E/h)"""
+        return np.ascontiguousarray(x.reshape(x.shape[0], h, -1).transpose(1, 0, 2))
+
+    def paat_pois(self, x):
+        """(h, L, d) -> (L, h*d)"""
+        return np.ascontiguousarray(x.transpose(1, 0, 2).reshape(x.shape[1], -1))
+
+    def sumennus2(self, x):
+        """ReplicationPad2d((1,0,1,0)) + AvgPool2d(2, stride=1)."""
+        p = np.pad(x, ((0, 0), (0, 0), (1, 0), (1, 0)), mode="edge")
+        return (p[:, :, :-1, :-1] + p[:, :, 1:, :-1] + p[:, :, :-1, 1:] + p[:, :, 1:, 1:]) * 0.25
+
 
 # ============================================================== ops: torch
 
@@ -469,6 +562,72 @@ class TorchOps:
     def uint8_hwc(self, x):
         t = (self.torch.clamp(x[0].float(), 0, 1) * 255.0 + 0.5).to(self.torch.uint8)
         return t.permute(1, 2, 0).contiguous().cpu().numpy()
+
+    # --- kuvien korjaus ja väritys (korjaus.py, vari.py)
+    def pad_ref(self, x, p):
+        return self.F.pad(x, (p, p, p, p), mode="reflect")
+
+    def blur_s2(self, x):
+        c = x.shape[1]
+        k = self.torch.tensor([1.0, 2.0, 1.0], device=x.device)
+        k = ((k[:, None] * k[None, :]) / 16.0).to(x.dtype).expand(c, 1, 3, 3)
+        return self.F.conv2d(self.F.pad(x, (1, 1, 1, 1), mode="reflect"), k, stride=2, groups=c)
+
+    def convT3s2(self, x, w, b):
+        return self.F.conv_transpose2d(x, w.to(x.dtype), b.to(x.dtype) if b is not None else None,
+                                       stride=2, padding=1, output_padding=1)
+
+    def spektri(self, x, w, s, t):
+        torch = self.torch
+        n, c, h, ww = x.shape
+        f = torch.fft.rfft2(x.float(), norm="ortho")
+        z = torch.stack([f.real, f.imag], dim=2).reshape(n, 2 * c, h, ww // 2 + 1)
+        z = self.F.conv2d(z, w.float()) * s.float().reshape(1, -1, 1, 1) + t.float().reshape(1, -1, 1, 1)
+        z = torch.relu(z).reshape(n, -1, 2, h, ww // 2 + 1)
+        return torch.fft.irfft2(torch.complex(z[:, :, 0], z[:, :, 1]), s=(h, ww), norm="ortho").to(x.dtype)
+
+    def dwconv7(self, x, w, b):
+        return self.F.conv2d(x, w.to(x.dtype), b.to(x.dtype), padding=3, groups=x.shape[1])
+
+    def patch_conv(self, x, w, b, k):
+        return self.F.conv2d(x, w.to(x.dtype), b.to(x.dtype), stride=k)
+
+    def ln_c(self, x, w, b, eps=1e-6):
+        xf = x.float()
+        u = xf.mean(1, keepdim=True)
+        s = (xf - u).pow(2).mean(1, keepdim=True)
+        return ((xf - u) / self.torch.sqrt(s + eps) * w.float().reshape(1, -1, 1, 1)
+                + b.float().reshape(1, -1, 1, 1)).to(x.dtype)
+
+    def ln_last(self, x, w, b, eps):
+        return self.F.layer_norm(x.float(), (x.shape[-1],), w.float(), b.float(), eps).to(x.dtype)
+
+    def gelu(self, x):
+        return self.F.gelu(x)
+
+    def softmax(self, x):
+        return self.torch.softmax(x.float(), dim=-1).to(x.dtype)
+
+    def kanavat_viimeiseksi(self, x):
+        return x.permute(0, 2, 3, 1).contiguous()
+
+    def kanavat_ensin(self, x):
+        return x.permute(0, 3, 1, 2).contiguous()
+
+    def matmul(self, a, b):
+        return self.torch.matmul(a, b.to(a.dtype))
+
+    def transpose_last(self, x):
+        return x.transpose(-1, -2)
+
+    def paat(self, x, h):
+        return x.reshape(x.shape[0], h, -1).transpose(0, 1).contiguous()
+
+    def paat_pois(self, x):
+        return x.transpose(0, 1).reshape(x.shape[1], -1)
+
+    def sumennus2(self, x):
+        return self.F.avg_pool2d(self.F.pad(x, (1, 0, 1, 0), mode="replicate"), 2, stride=1)
 
 
 # ============================================================== skaalausmatriisit

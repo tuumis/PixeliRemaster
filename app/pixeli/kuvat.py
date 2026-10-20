@@ -306,7 +306,7 @@ def _pikkukuva(polku, rgb, alfa=None, koko=(192, 120)):
 
 def analysoi_kuva(src: Path, wd: Path):
     st = src.stat()
-    avain = [st.st_size, int(st.st_mtime), m.VERSIO, "kuva", 3]
+    avain = [st.st_size, int(st.st_mtime), m.VERSIO, "kuva", 4]
     vanha = m.lue_json(wd / "analyysi.json")
     if vanha and vanha.get("avain") == avain and (wd / "pikku.png").exists() and (wd / "yleis.png").exists():
         return vanha
@@ -358,11 +358,13 @@ def analysoi_kuva(src: Path, wd: Path):
         tyyppi, suositus = "valokuva", 2
     if max(w, h) >= 3000:
         huomiot.append("kuva_suuri")
+    from . import vari
+    harmaa = vari.harmaasavy(rgb) < vari.HARMAA_RAJA
     muoto = {"mjpeg": "jpeg"}.get(koodekki, koodekki)
     d = {"laji": "kuva", "avain": avain, "lahde": str(src), "leveys": w, "korkeus": h,
          "leveys_raaka": w0, "korkeus_raaka": h0, "suunta": suunta, "alfa_mahd": an["alfa_mahd"],
          "alfa": alfa is not None, "koodekki": koodekki, "muoto": muoto, "laatu": laatu, "varit": varit,
-         "tyyppi": tyyppi, "suositus": suositus, "huomiot": huomiot, "rajaus": [0, 0, w, h],
+         "tyyppi": tyyppi, "suositus": suositus, "huomiot": huomiot, "rajaus": [0, 0, w, h], "harmaa": harmaa,
          "sar": "1/1", "dar_levy": f"{Fraction(w, h).numerator}/{Fraction(w, h).denominator}",
          "kesto": 0.0, "fps": "1/1", "R": "1/1", "lomitus": "kuva", "matriisi": "bt709", "tekstityksia": 0}
     m.kirjoita_json(wd / "analyysi.json", d)
@@ -399,7 +401,8 @@ def geometria_kuva(an, valinta=None, kohde=(2560, 1440)):
     va = vaihtoehdot[sk]
     return {"rajaus": [0, 0, w, h], "ow": va["ow"], "oh": va["oh"], "suhde": w / h, "suhde_nimi": None,
             "dar": f"{w}:{h}", "skaala": sk, "s": va["s"], "kierrokset": va["kierrokset"],
-            "vaihtoehdot": vaihtoehdot, "kierto": kierto}
+            "vaihtoehdot": vaihtoehdot, "kierto": kierto,
+            "naarmut": bool(valinta.get("naarmut")), "vari": bool(valinta.get("vari"))}
 
 
 def asetus_kuva(L, n, saato, geo):
@@ -412,7 +415,12 @@ def asetus_kuva(L, n, saato, geo):
 
 def koe_tunniste(geo):
     return hashlib.sha1(json.dumps([geo["rajaus"], geo["ow"], geo["oh"], geo["kierrokset"], geo.get("kierto", 0),
-                                    m.VERSIO, "kuva", 3]).encode()).hexdigest()[:8]
+                                    m.VERSIO, "kuva", 3] + _korjaukset(geo)).encode()).hexdigest()[:8]
+
+
+def _korjaukset(geo):
+    """Valitut vanhan kuvan korjaukset (tehdään lähdekuvalle ennen parannusta)."""
+    return [k for k in ("naarmut", "vari") if geo.get(k)]
 
 
 def esikatselualueet(rgb, geo):
@@ -454,14 +462,20 @@ def _alue_koko(alue, geo):
     return max(1, int(round(alue[3] * s))), max(1, int(round(alue[2] * s)))
 
 
-def _koko_kuva(src, an, kd, geo):
-    """Purettu (ja käyttäjän valitsemalla tavalla käännetty) lähdekuva välimuistista. Samalla
-    kirjoitetaan yleiskuva esikatselualueiden valintaan."""
+def _koko_kuva(src, an, kd, geo, L=None, palaute=None):
+    """Purettu (ja käyttäjän valitsemalla tavalla käännetty ja korjattu) lähdekuva välimuistista.
+    Samalla kirjoitetaan yleiskuva esikatselualueiden valintaan. Ilman laitetta (L) korjauksia
+    ei voi laskea: silloin palautetaan korjaamaton kuva tallentamatta sitä."""
     p, pa = kd / "koko.npy", kd / "koko_alfa.npy"
     if p.exists() and (kd / "yleis.png").exists():
         return np.load(p, mmap_mode="r"), (np.load(pa, mmap_mode="r") if pa.exists() else None)
     rgb, alfa = pura(src, an)
     rgb, alfa = kaanna(rgb, geo.get("kierto", 0)), (kaanna(alfa, geo.get("kierto", 0)) if alfa is not None else None)
+    if _korjaukset(geo):
+        if L is None:
+            return rgb, alfa
+        with L.lukko:
+            rgb = L.korjaa_kuva(rgb, geo.get("naarmut"), geo.get("vari"), palaute)
     np.save(p, rgb)
     if alfa is not None:
         np.save(pa, alfa)
@@ -478,11 +492,11 @@ def _tallenna_lahdealue(kd, i, rgb, alfa, alue):
     return osa
 
 
-def lahdealueet(src, an, geo, kd):
+def lahdealueet(src, an, geo, kd, L=None, palaute=None):
     tiedot = m.lue_json(kd / "alueet.json")
     if tiedot and all((kd / f"lahde_{i}.npy").exists() for i in range(1, len(tiedot) + 1)):
         return tiedot, [np.load(kd / f"lahde_{i}.npy") for i in range(1, len(tiedot) + 1)]
-    rgb, alfa = _koko_kuva(src, an, kd, geo)
+    rgb, alfa = _koko_kuva(src, an, kd, geo, L, palaute)
     alueet = esikatselualueet(np.asarray(rgb), geo)
     kuvat = [_tallenna_lahdealue(kd, i, rgb, alfa, a) for i, a in enumerate(alueet, 1)]
     m.kirjoita_json(kd / "alueet.json", alueet)
@@ -522,12 +536,15 @@ def koekuvat_kuva(src, an, geo, wd, L, edistys=None, peruuta=None):
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
     kd.mkdir(parents=True, exist_ok=True)
-    alueet, kuvat = lahdealueet(src, an, geo, kd)
+    korjaus_osuus = 3 if _korjaukset(geo) and not (kd / "koko.npy").exists() else 0
+    vaiheet_arvio = len(m.ASETUKSET) * 3 + korjaus_osuus
+    alueet, kuvat = lahdealueet(src, an, geo, kd, L, (lambda f: edistys(int(f * korjaus_osuus), vaiheet_arvio))
+                                if edistys and korjaus_osuus else None)
     mt = mittaa_kuva(src, an, geo, wd)
     ol = mt["oletukset"]
     oh, ow = _alue_koko(alueet[0], geo)
-    vaiheet = len(m.ASETUKSET) * len(kuvat)
-    tehty = 0
+    vaiheet = len(m.ASETUKSET) * len(kuvat) + korjaus_osuus
+    tehty = korjaus_osuus
     aika = {}
     for n in m.ASETUKSET:
         with L.lukko:
@@ -563,14 +580,14 @@ def siirra_alue(src, an, geo, wd, L, k, cx, cy, edistys=None):
     sen vertailukuvat kaikilla asetuksilla. Palauttaa päivitetyt alueet."""
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
-    alueet, _ = lahdealueet(src, an, geo, kd)
+    alueet, _ = lahdealueet(src, an, geo, kd, L)
     k = max(1, min(len(alueet), int(k)))
     _, _, aw, ah = alueet[k - 1]
     w, h = geo["rajaus"][2], geo["rajaus"][3]
     x = int(max(0, min(w - aw, round(float(cx) - aw / 2)))) // 2 * 2
     y = int(max(0, min(h - ah, round(float(cy) - ah / 2)))) // 2 * 2
     alueet[k - 1] = [x, y, aw, ah]
-    rgb, alfa = _koko_kuva(src, an, kd, geo)
+    rgb, alfa = _koko_kuva(src, an, kd, geo, L)
     osa = _tallenna_lahdealue(kd, k, rgb, alfa, alueet[k - 1])
     oh, ow = _alue_koko(alueet[k - 1], geo)
     ol = mittaa_kuva(src, an, geo, wd)["oletukset"]
@@ -594,7 +611,7 @@ def saatokuva_kuva(src, an, geo, wd, L, n, saato, k):
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
     kd.mkdir(parents=True, exist_ok=True)
-    alueet, kuvat = lahdealueet(src, an, geo, kd)
+    alueet, kuvat = lahdealueet(src, an, geo, kd, L)
     k = max(1, min(len(kuvat), int(k)))
     avain = hashlib.sha1(json.dumps([n, saato, k, alueet[k - 1]], sort_keys=True).encode()).hexdigest()[:10]
     nimi = f"s_{avain}.png"
@@ -628,9 +645,19 @@ def kasittele_kuva(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=Non
     n = int(valinta.get("asetus") or an["suositus"])
     saato = valinta.get("saato") or mittaa_kuva(src, an, geo, wd)["oletukset"].get(str(n))
     t0 = time.time()
-    rgb, alfa = pura(src, an)
-    rgb = kaanna(rgb, geo.get("kierto", 0))
-    alfa = kaanna(alfa, geo.get("kierto", 0)) if alfa is not None else None
+    korjaukset = _korjaukset(geo)
+    valimuisti = wd / f"koe_{koe_tunniste(geo)}" / "koko.npy"
+    if korjaukset and valimuisti.exists():         # esikatselussa jo korjattu kuva
+        rgb = np.array(np.load(valimuisti))
+        alfa = None
+        pa = valimuisti.with_name("koko_alfa.npy")
+        if pa.exists():
+            alfa = np.array(np.load(pa))
+        korjaukset = []
+    else:
+        rgb, alfa = pura(src, an)
+        rgb = kaanna(rgb, geo.get("kierto", 0))
+        alfa = kaanna(alfa, geo.get("kierto", 0)) if alfa is not None else None
     h, w, _ = rgb.shape
     oh, ow = geo["oh"], geo["ow"]
     tila = {"viim": 0.0}
@@ -647,6 +674,16 @@ def kasittele_kuva(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=Non
 
     if edistys:
         edistys({"tehty": 0, "kaikki": 1000, "nopeus": None, "jaljella_s": None})
+    alku_osuus = 0.0
+    if korjaukset:                                   # naarmut ja väritys ennen parannusta
+        alku_osuus = 0.25
+        with L.lukko:
+            try:
+                rgb = L.korjaa_kuva(rgb, geo.get("naarmut"), geo.get("vari"), lambda f: palaute(max(0.001, f * alku_osuus)))
+            finally:
+                L.tyhjenna()
+    jatko = palaute
+    palaute = lambda f: jatko(alku_osuus + (1 - alku_osuus) * f)  # noqa: E731
     with L.lukko, L.inferenssi():
         try:
             asetus = asetus_kuva(L, n, saato, geo)

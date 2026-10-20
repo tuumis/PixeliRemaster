@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Lataa ja tarkista mallit
+      - name: Lataa, muunna ja tarkista mallit
         run: |
-          python3 -m pip install -q numpy
-          python3 installer/mallit.py dist_mallit
+          python -m pip install -q numpy torch --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+          python installer/mallit.py dist_mallit
 
       - name: Julkaise
         env:

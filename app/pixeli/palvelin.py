@@ -101,7 +101,7 @@ class Sovellus:
             return {}
         if polku == "valinta":
             j.aseta_valinta(d["id"], {k: d[k] for k in ("asetus", "saato", "dar", "skaala", "kierto", "muoto", "laatu",
-                                                        "aanet", "tekstit", "ulkoiset") if k in d})
+                                                        "aanet", "tekstit", "ulkoiset", "naarmut", "vari") if k in d})
             return {}
         if polku == "esikatsele":
             j.esikatsele(d["id"])

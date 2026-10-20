@@ -15,7 +15,9 @@ from . import moottori as m
 
 JULKAISU = "https://github.com/tuumis/PixeliRemaster/releases/download/mallit-1/"
 
-# nimi -> tiedot. "lahde" on alkuperäinen osoite (käytetään vain julkaisun kokoamisessa).
+# nimi -> tiedot. "lahde" on alkuperäinen osoite; "jasen" on tiedosto zip-paketin sisällä ja "muunnos"
+# julkaisua koottaessa tehtävä muunnos (installer/mallit.py). Muunnettuja malleja ladataan vain
+# ohjelman omasta julkaisusta.
 LUETTELO = {
     "kohina": {
         "tiedosto": "drunet_color.pth",
@@ -38,6 +40,32 @@ LUETTELO = {
         "lahde": "https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth",
         "kuvaus": "RetinaFace ResNet-50 (facexlib, Xintao Wang), MIT",
     },
+    "naarmut": {
+        "tiedosto": "bopbtl_naarmut.pth",
+        "koko": None,
+        "sha256": None,
+        "lahde": "https://github.com/microsoft/Bringing-Old-Photos-Back-to-Life/releases/download/v1.0/global_checkpoints.zip",
+        "jasen": "detection/FT_Epoch_latest.pt",
+        "muunnos": "model_state",
+        "kuvaus": "Naarmujen tunnistus (Bringing Old Photos Back to Life, Microsoft), MIT",
+    },
+    "taytto": {
+        "tiedosto": "big_lama.pth",
+        "koko": None,
+        "sha256": None,
+        "lahde": "https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip",
+        "jasen": "models/best.ckpt",
+        "muunnos": "generaattori",
+        "kuvaus": "Big LaMa (Suvorov ym., Samsung AI), Apache 2.0",
+    },
+    "vari": {
+        "tiedosto": "ddcolor_modelscope_fp16.pth",
+        "koko": None,
+        "sha256": None,
+        "lahde": "https://huggingface.co/piddnad/DDColor-models/resolve/main/ddcolor_modelscope.pth",
+        "muunnos": "fp16",
+        "kuvaus": "DDColor (Kang ym., DAMO Academy), Apache 2.0",
+    },
 }
 
 KANSIO = m.DATA / "mallit"
@@ -49,7 +77,7 @@ def polku(nimi):
     """Ladatun mallin polku tai None. Ohjelman mukana tuleva malli kelpaa myös (kehitys ja testit)."""
     t = LUETTELO[nimi]
     for p in (KANSIO / t["tiedosto"], m.MALLIT / t["tiedosto"]):
-        if p.exists() and p.stat().st_size == t["koko"]:
+        if p.exists() and t["koko"] and p.stat().st_size == t["koko"]:
             return p
     return None
 
@@ -83,10 +111,12 @@ def varmista(nimi, edistys=None, peruuta=None):
     m.loki(f"Ladataan malli {t['tiedosto']}")
     try:
         # ensin ohjelman oma julkaisu, sitten alkuperäinen lähde (summa tarkistetaan kummastakin)
-        osoitteet = [JULKAISU + t["tiedosto"], t["lahde"]]
+        osoitteet = [JULKAISU + t["tiedosto"]]
+        if not t.get("jasen") and not t.get("muunnos"):
+            osoitteet.append(t["lahde"])
         for yritys in range(4):
             try:
-                with urllib.request.urlopen(osoitteet[yritys % 2], timeout=60) as r, open(tmp, "wb") as f:
+                with urllib.request.urlopen(osoitteet[yritys % len(osoitteet)], timeout=60) as r, open(tmp, "wb") as f:
                     tehty = 0
                     while True:
                         if peruuta is not None and peruuta.is_set():
@@ -102,7 +132,7 @@ def varmista(nimi, edistys=None, peruuta=None):
                             edistys(tehty, t["koko"])
                 break
             except (OSError, ValueError) as e:
-                m.loki(f"Mallin lataus epäonnistui ({osoitteet[yritys % 2]}): {e}")
+                m.loki(f"Mallin lataus epäonnistui ({osoitteet[yritys % len(osoitteet)]}): {e}")
                 if yritys == 3:
                     raise RuntimeError("mallin_lataus") from e
                 time.sleep(2)

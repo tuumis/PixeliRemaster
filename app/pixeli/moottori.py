@@ -867,6 +867,41 @@ class Laite:
         with self.inferenssi():
             return kasvot.palauta(self.ops, T, G, np.ascontiguousarray(lahde_u8), tulos_u8, float(voimakkuus))
 
+    def korjausmallit(self):
+        """(naarmuntunnistin, LaMa) vanhojen kuvien korjaukseen; ladataan ensimmäisellä käytöllä. fp32."""
+        if "korjaus" not in self._mallit:
+            from . import korjaus, lisamallit
+            T = korjaus.Naarmuntunnistin(self.ops, kuva.lataa_pth(lisamallit.varmista("naarmut")))
+            LM = korjaus.LaMa(self.ops, kuva.lataa_pth(lisamallit.varmista("taytto")))
+            self._mallit["korjaus"] = (T, LM)
+        return self._mallit["korjaus"]
+
+    def varimalli(self):
+        """DDColor; painot ovat puolitarkkuudella, laskenta fp32:na."""
+        if "vari" not in self._mallit:
+            from . import vari, lisamallit
+            self._mallit["vari"] = vari.DDColor(self.ops, kuva.lataa_pth(lisamallit.varmista("vari")))
+        return self._mallit["vari"]
+
+    def korjaa_kuva(self, rgb_u8, naarmut=False, varita=False, palaute=None):
+        """Vanhan kuvan korjaukset ennen parannusta: naarmujen ja pölyn poisto, väritys."""
+        from . import korjaus, vari
+        osat = [n for n, k in (("naarmut", naarmut), ("vari", varita)) if k]
+        tulos = rgb_u8
+        with self.inferenssi():
+            for i, osa in enumerate(osat):
+                def pal(f, i=i):
+                    if palaute:
+                        palaute((i + f) / len(osat))
+                if osa == "naarmut":
+                    T, LM = self.korjausmallit()
+                    maski = korjaus.tunnista(self.ops, T, tulos)
+                    tulos = korjaus.tayta(self.ops, LM, tulos, maski, pal)
+                else:
+                    tulos = vari.varita(self.ops, self.varimalli(), tulos, pal)
+                self.tyhjenna()
+        return tulos
+
     def kohinamalli(self):
         if "kohina" not in self._mallit:
             from . import lisamallit

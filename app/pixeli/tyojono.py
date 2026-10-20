@@ -222,11 +222,15 @@ class Jono:
                     v[k] = sorted({int(i) for i in valinta[k]}) if valinta[k] is not None else None
             if "ulkoiset" in valinta:
                 v["ulkoiset"] = False if valinta["ulkoiset"] is False else None
+            for k in ("naarmut", "vari"):          # vanhan kuvan korjaukset
+                if k in valinta:
+                    v[k] = True if valinta[k] else None
             t["valinta"] = {k: x for k, x in v.items() if x is not None}
             if t.get("analyysi"):
                 vanha = (t.get("koe") or {}).get("tunniste")
                 self._paivita_geometria(t)
-                if ("dar" in valinta or "skaala" in valinta or "kierto" in valinta) and vanha != self._koe_tunniste(t):
+                if any(k in valinta for k in ("dar", "skaala", "kierto", "naarmut", "vari")) \
+                        and vanha != self._koe_tunniste(t):
                     t["koe"] = {"tila": "ei"}
         self._tallenna()
 
@@ -238,7 +242,7 @@ class Jono:
             v = dict(lahde.get("valinta") or {})
             if not v.get("asetus") and lahde.get("analyysi"):
                 v["asetus"] = lahde["analyysi"]["suositus"]
-            kopio = {k: v.get(k) for k in ("asetus", "saato", "skaala", "muoto", "laatu")}
+            kopio = {k: v.get(k) for k in ("asetus", "saato", "skaala", "muoto", "laatu", "naarmut", "vari")}
             n = 0
             for t in self.tyot:
                 if t is lahde or t.get("laji") != lahde.get("laji") or t["tila"] not in ("odottaa", "keskeytetty", "virhe"):
@@ -246,12 +250,13 @@ class Jono:
                 if t["tila"] == "keskeytetty" and t.get("aloitettu"):
                     continue          # osittain käsiteltyä ei muuteta (osat on tehty vanhoilla asetuksilla)
                 uusi = dict(t.get("valinta") or {})
-                uusi.update({k: x for k, x in kopio.items() if k not in ("skaala", "muoto") or t.get("laji") == "kuva"})
-                vanha_skaala = (t.get("valinta") or {}).get("skaala")
+                uusi.update({k: x for k, x in kopio.items()
+                             if k not in ("skaala", "muoto", "naarmut", "vari") or t.get("laji") == "kuva"})
+                vanha = (t.get("koe") or {}).get("tunniste")
                 t["valinta"] = {k: x for k, x in uusi.items() if x is not None}
                 if t.get("analyysi"):
                     self._paivita_geometria(t)
-                    if t.get("laji") == "kuva" and vanha_skaala != t["valinta"].get("skaala"):
+                    if t.get("laji") == "kuva" and vanha != self._koe_tunniste(t):
                         t["koe"] = {"tila": "ei"}
                 n += 1
         self._tallenna()
@@ -348,7 +353,7 @@ class Jono:
                     d["analyysi"] = {k: an.get(k) for k in (
                         "leveys", "korkeus", "koodekki", "kesto", "fps", "R", "lomitus", "desimointi",
                         "tyyppi", "suositus", "tekstityksia", "huomiot", "rajaus", "dar_levy",
-                        "laji", "muoto", "laatu", "alfa", "aaniraidat", "tekstiraidat")}
+                        "laji", "muoto", "laatu", "alfa", "aaniraidat", "tekstiraidat", "harmaa")}
                 d.setdefault("laji", "video")
                 tyot.append(d)
             jonossa = [t for t in self.tyot if t["tila"] in ("jonossa", "kasitellaan")]
@@ -573,7 +578,7 @@ class Jono:
             with self.lukko:
                 t["tila"] = "virhe"
                 t["virhe"] = {"avain": "muisti" if muisti else str(e) if str(e) in (
-                    "ffmpeg_puuttuu", "tiedostoa_ei_loydy", "malli_puuttuu") else "kuva", "tieto": str(e)[-600:]}
+                    "ffmpeg_puuttuu", "tiedostoa_ei_loydy", "malli_puuttuu", "mallin_lataus") else "kuva", "tieto": str(e)[-600:]}
             try:
                 self._laite("esikatselu").tyhjenna()
             except Exception:  # noqa: BLE001

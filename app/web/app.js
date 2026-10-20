@@ -251,6 +251,7 @@ function tyoAllekirjoitus(x) {
   return JSON.stringify([KIELI, x.id, x.tila, !!x.analyysi, x.koe && x.koe.tila, x.koe && x.koe.tunniste,
     (x.valinta || {}).asetus, (x.valinta || {}).dar, (x.valinta || {}).skaala, (x.valinta || {}).kierto, (x.valinta || {}).muoto,
     (x.valinta || {}).laatu, (x.valinta || {}).aanet, (x.valinta || {}).tekstit, (x.valinta || {}).ulkoiset, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
+    (x.valinta || {}).naarmut, (x.valinta || {}).vari,
     x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika,
     x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan,
     TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length]);
@@ -407,7 +408,7 @@ function vertailuHtml(x) {
       <div class="jako"></div><span class="lappu v" id="lappu-v">${t("vertailu.alkuperainen")}</span><span class="lappu o" id="lappu-o"></span></div>`;
   }
   if (!TILA.ymparisto.valmis) return `<div class="vertailu-tyhja"><div>${t("vertailu.odottaa_asennusta")}</div></div>`;
-  if (k.tila === "virhe") return `<div class="vertailu-tyhja"><div>${t("vertailu.virhe")}<br><br><button class="painike toissijainen" id="koe-uudelleen">${t("vertailu.uudelleen")}</button></div></div>`;
+  if (k.tila === "virhe") return `<div class="vertailu-tyhja"><div>${t(String(k.tieto || "").includes("mallin_lataus") ? "virhe.mallin_lataus" : "vertailu.virhe")}<br><br><button class="painike toissijainen" id="koe-uudelleen">${t("vertailu.uudelleen")}</button></div></div>`;
   return `<div class="vertailu-tyhja"><div>${t("vertailu.luodaan")}<div class="edistys"><i id="koe-palkki"></i></div></div></div>`;
 }
 
@@ -477,6 +478,11 @@ function paneeliHtml(x, n, muokattava) {
       <div class="valinta-rivi"><label for="muoto">${t("muoto.otsikko")}</label>
       <select id="muoto" ${ei}><option value="" ${!muoto ? "selected" : ""}>${t("muoto.auto", {m: autoMuoto})}</option>
         <option value="jpg" ${muoto === "jpg" ? "selected" : ""}>JPEG</option><option value="png" ${muoto === "png" ? "selected" : ""}>${t("muoto.png")}</option></select></div>
+      <div class="valinta-rivi vanha"><label>${t("vanha.otsikko")}</label><span class="valintaruudut">
+        <label class="ruutu" title="${esc(t("vanha.naarmut_selite"))}"><input type="checkbox" id="naarmut" ${(x.valinta || {}).naarmut ? "checked" : ""} ${ei}> ${t("vanha.naarmut")}</label>
+        <label class="ruutu" title="${esc(t("vanha.vari_selite"))}"><input type="checkbox" id="vari" ${(x.valinta || {}).vari ? "checked" : ""} ${ei}> ${t("vanha.vari")}</label>
+      </span></div>
+      ${x.analyysi.harmaa && !(x.valinta || {}).vari ? `<p class="selite vihje-vari">${t("vanha.harmaa_vihje")}</p>` : ""}
     </div>`;
   } else {
     const laatu = (x.valinta || {}).laatu || "";
@@ -617,6 +623,12 @@ function kytkeTyo(x) {
     await api("valinta", {id, kierto: uusi}).catch(() => {}); hae();
   }));
   $("#muoto")?.addEventListener("change", async e => { await api("valinta", {id, muoto: e.target.value || null}).catch(() => {}); hae(); });
+  for (const k of ["naarmut", "vari"]) {
+    $("#" + k)?.addEventListener("change", async e => {
+      const nk = nakyma(id); nk.saatoUrl = {}; nk.kohta = 1;
+      await api("valinta", {id, [k]: e.target.checked}).catch(() => {}); hae();
+    });
+  }
   $("#laatu")?.addEventListener("change", async e => { await api("valinta", {id, laatu: e.target.value || null}).catch(() => {}); hae(); });
   $("#raidat")?.addEventListener("toggle", e => { nakyma(id).raidatAuki = e.currentTarget.open; });
   if (nakyma(id).raidatAuki && $("#raidat")) $("#raidat").open = true;
