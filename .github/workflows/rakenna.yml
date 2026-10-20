@@ -4,6 +4,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      julkaise:
+        description: "Julkaise versio Releases-sivulle (tagi v<VERSIO>)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -54,8 +59,12 @@ jobs:
           path: dist/*.exe
 
       - name: Julkaise
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.julkaise
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSIO }}
+          target_commitish: ${{ github.sha }}
+          name: PixeliRemaster ${{ env.VERSIO }}
+          make_latest: true
           files: dist/*.exe
           body_path: installer/julkaisutiedot.md
