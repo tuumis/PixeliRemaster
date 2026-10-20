@@ -23,6 +23,8 @@ def lataa_pth(polku):
     Tiedosto on zip, jonka sisällä pickle; vain tensorit ja sanakirjat sallitaan."""
     DT = {"FloatStorage": np.float32, "HalfStorage": np.float16, "BFloat16Storage": None,
           "DoubleStorage": np.float64, "LongStorage": np.int64, "IntStorage": np.int32}
+    if not zipfile.is_zipfile(polku):
+        return _lataa_pth_vanha(polku, DT)
     zf = zipfile.ZipFile(polku)
     nimet = zf.namelist()
     pkl = next(n for n in nimet if n.endswith("data.pkl"))
@@ -55,6 +57,69 @@ def lataa_pth(polku):
             return np.frombuffer(raw, dtype=dt)[:n]
 
     sd = Lukija(zf.open(pkl)).load()
+    for k in ("params_ema", "params", "state_dict"):
+        if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
+            sd = sd[k]
+    return {k: np.asarray(v, dtype=np.float32) for k, v in sd.items()}
+
+
+def _lataa_pth_vanha(polku, DT):
+    """PyTorchin vanha (ennen 1.6) tallennusmuoto: taikaluku, versio ja järjestelmätiedot picklenä,
+    sitten rakenne (tensorit viitteinä tallennuksiin), tallennusten avaimet ja lopuksi raakadata."""
+    import io
+    with open(polku, "rb") as f:
+        data = f.read()
+    bio = io.BytesIO(data)
+    tallennukset = {}          # avain -> [dtype, taulukko]
+    tensorit = []              # (avain, offset, koko, askel)
+
+    class Lukija(pickle.Unpickler):
+        def find_class(self, mod, name):
+            if name == "_rebuild_tensor_v2":
+                def rb(avain, offset, size, stride, *a):
+                    tensorit.append((avain, offset, tuple(size), tuple(stride)))
+                    return ("__tensori__", len(tensorit) - 1)
+                return rb
+            if name == "_rebuild_parameter":
+                return lambda d, *a: d
+            if name == "OrderedDict":
+                return collections.OrderedDict
+            if mod.startswith("torch") and name.endswith("Storage"):
+                return name
+            raise pickle.UnpicklingError(f"Ei sallittu: {mod}.{name}")
+
+        def persistent_load(self, pid):
+            _, styp, avain = pid[:3]
+            if not isinstance(styp, str):
+                styp = getattr(styp, "__name__", str(styp))
+            tallennukset.setdefault(avain, [DT[styp], None])
+            return avain
+
+    for _ in range(3):
+        pickle.load(bio)
+    rakenne = Lukija(bio).load()
+    avaimet = pickle.load(bio)
+    pos = bio.tell()
+    for avain in avaimet:
+        dt = tallennukset[avain][0]
+        maara = int.from_bytes(data[pos:pos + 8], "little")
+        pos += 8
+        koko = maara * np.dtype(dt).itemsize
+        tallennukset[avain][1] = np.frombuffer(data[pos:pos + koko], dtype=dt)
+        pos += koko
+
+    def ratkaise(o):
+        if isinstance(o, tuple) and len(o) == 2 and o[0] == "__tensori__":
+            avain, off, size, stride = tensorit[o[1]]
+            st = tallennukset[avain][1]
+            if not size:
+                return st[off:off + 1].reshape(()).astype(np.float32)
+            it = st.itemsize
+            return np.lib.stride_tricks.as_strided(st[off:], shape=size, strides=[x * it for x in stride]).astype(np.float32)
+        if isinstance(o, dict):
+            return {k: ratkaise(v) for k, v in o.items()}
+        return o
+    sd = ratkaise(rakenne)
     for k in ("params_ema", "params", "state_dict"):
         if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
             sd = sd[k]
@@ -184,6 +249,27 @@ class NumpyOps:
     def zeros(self, shape, mallina):
         return np.zeros(shape, dtype=mallina.dtype)
 
+    def relu(self, x):
+        return np.maximum(x, 0)
+
+    def conv_s2(self, x, w):
+        """2x2-konvoluutio askeleella 2 (puolittaa koon), ilman biasia."""
+        n, c, h, ww = x.shape
+        t = x.reshape(n, c, h // 2, 2, ww // 2, 2)
+        return np.einsum("ocij,nchiwj->nohw", w, t, optimize=True).astype(np.float32)
+
+    def convT_s2(self, x, w):
+        """2x2-transpoosikonvoluutio askeleella 2 (kaksinkertaistaa koon); w muotoa (in, out, 2, 2)."""
+        n, c, h, ww = x.shape
+        o = w.shape[1]
+        return np.einsum("nchw,coij->nohiwj", x, w, optimize=True).reshape(n, o, h * 2, ww * 2).astype(np.float32)
+
+    def pad_replicate(self, x, oikea, ala):
+        return np.pad(x, ((0, 0), (0, 0), (0, ala), (0, oikea)), mode="edge")
+
+    def taysi(self, mallina, shape, arvo):
+        return np.full(shape, arvo, dtype=mallina.dtype)
+
     def lisaa_(self, a, b):
         a += b
         return a
@@ -295,6 +381,21 @@ class TorchOps:
 
     def zeros(self, shape, mallina):
         return self.torch.zeros(shape, dtype=mallina.dtype, device=mallina.device)
+
+    def relu(self, x):
+        return self.F.relu(x)
+
+    def conv_s2(self, x, w):
+        return self.F.conv2d(x, w.to(x.dtype), None, stride=2)
+
+    def convT_s2(self, x, w):
+        return self.F.conv_transpose2d(x, w.to(x.dtype), None, stride=2)
+
+    def pad_replicate(self, x, oikea, ala):
+        return self.F.pad(x, (0, oikea, 0, ala), mode="replicate")
+
+    def taysi(self, mallina, shape, arvo):
+        return self.torch.full(shape, arvo, dtype=mallina.dtype, device=mallina.device)
 
     def lisaa_(self, a, b):
         return a.add_(b)
@@ -591,6 +692,62 @@ class Malli:
         else:
             self.P = {k: h(v) for k, v in self.P.items()}
             self.lohkot = [{k: (v if k == "norm" else h(v)) for k, v in L.items()} for L in self.lohkot]
+
+
+class Kohinanpoisto:
+    """DRUNet (Kai Zhang ym., KAIR, MIT): kohinan- ja pakkausjälkien poisto ennen skaalausta.
+    Voimakkuus annetaan kohinatasona (sigma, 0..255-asteikolla), joten siivousta voi säätää."""
+
+    def __init__(self, ops, sd):
+        self.ops = o = ops
+        self.puoli = False
+        self.P = {k: o.param(v) for k, v in sd.items()}
+        if "m_head.weight" not in sd or sd["m_head.weight"].shape[1] != 4:
+            raise ValueError("Tuntematon kohinanpoistomalli")
+
+    def puolita(self):
+        if getattr(self.ops, "ht", False):
+            self.P = {k: v.half() for k, v in self.P.items()}
+            self.puoli = True
+
+    def _res(self, x, p):
+        o, P = self.ops, self.P
+        return x + o.conv2d(o.relu(o.conv2d(x, P[p + ".res.0.weight"], None, 1)), P[p + ".res.2.weight"], None, 1)
+
+    def __call__(self, x, sigma):
+        """x (n,3,h,w) 0..1 -> siivottu kuva. Kuva täydennetään 8:lla jaolliseksi (kuten alkuperäisessä)."""
+        o, P = self.ops, self.P
+        n, _, h, w = x.shape
+        ph, pw = (8 - h % 8) % 8, (8 - w % 8) % 8
+        xp = o.pad_replicate(x, pw, ph) if (ph or pw) else x
+        if self.puoli:
+            xp = o.half(xp)
+        kartta = o.taysi(xp, (n, 1, h + ph, w + pw), float(sigma) / 255.0)
+        x0 = o.cat([xp, kartta])
+        x1 = o.conv2d(x0, P["m_head.weight"], None, 1)
+        x2 = self._taso(x1, 1)
+        x3 = self._taso(x2, 2)
+        x4 = self._taso(x3, 3)
+        y = x4
+        for j in range(4):
+            y = self._res(y, f"m_body.{j}")
+        y = self._ylos(y + x4, 3)
+        y = self._ylos(y + x3, 2)
+        y = self._ylos(y + x2, 1)
+        y = o.conv2d(y + x1, P["m_tail.weight"], None, 1)
+        y = o.float(y)
+        return y[:, :, :h, :w]
+
+    def _taso(self, y, i):
+        for j in range(4):
+            y = self._res(y, f"m_down{i}.{j}")
+        return self.ops.conv_s2(y, self.P[f"m_down{i}.4.weight"])
+
+    def _ylos(self, y, i):
+        y = self.ops.convT_s2(y, self.P[f"m_up{i}.0.weight"])
+        for j in range(1, 5):
+            y = self._res(y, f"m_up{i}.{j}")
+        return y
 
 
 # ============================================================== käsittelyketju

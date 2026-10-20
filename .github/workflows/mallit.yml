@@ -15,7 +15,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Lataa ja tarkista mallit
-        run: python3 installer/mallit.py dist_mallit
+        run: |
+          python3 -m pip install -q numpy
+          python3 installer/mallit.py dist_mallit
 
       - name: Julkaise
         env:
