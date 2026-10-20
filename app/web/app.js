@@ -244,7 +244,8 @@ function tyoAllekirjoitus(x) {
   if (!x) return "tyhja:" + KIELI + TILA.ikkuna;
   return JSON.stringify([KIELI, x.id, x.tila, !!x.analyysi, x.koe && x.koe.tila, x.koe && x.koe.tunniste,
     (x.valinta || {}).asetus, (x.valinta || {}).dar, (x.valinta || {}).skaala, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
-    x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika]);
+    x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika,
+    x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan]);
 }
 
 function piirraTyo() {
@@ -315,41 +316,43 @@ function tyoHtml(x) {
   const n = nykyinenAsetus(x);
   const nk = nakyma(x.id);
   if (nk.saato === null) nk.saato = Object.assign(oletusSaato(n, x), (x.valinta || {}).saato || {});
-  const otsikko = `<div class="tyo-otsikko"><div class="tyo-nimi"><h1>${esc(x.nimi)}</h1><div class="polku">${esc(x.polku)}</div></div>
+  const otsikko = `<div class="tyo-otsikko"><div class="tyo-nimi"><h1 title="${esc(x.polku)}">${esc(x.nimi)}</h1>
+      ${x.analyysi ? faktatHtml(x) : `<div class="polku">${esc(x.polku)}</div>`}</div>
     <div class="tyo-toiminnot"><button class="painike pieni haamu" id="poista">${t("toiminto.poista")}</button>${toimintoHtml(x)}</div></div>`;
   let tila = "";
   if (x.tila === "kasitellaan" || (x.tila === "keskeytetty" && x.edistys)) {
     tila = `<div class="kaynnissa" id="kaynnissa"><div class="prosentti" id="k-pros">–</div>
-      <div class="rivit"><div id="k-jaljella"></div><div id="k-nopeus" class="num"></div></div>
+      <div class="rivit"><span id="k-jaljella"></span><span id="k-nopeus" class="num"></span></div>
       <div class="edistys"><i id="k-palkki"></i></div></div>`;
   } else if (x.tila === "valmis" && x.tulos) {
     const r = x.tulos;
     const lisat = [];
+    if (onKuva(x) && r.koko) lisat.push(t("valmis.koko", {w: r.koko[0], h: r.koko[1]}));
     if (r.aika_s) lisat.push(t("valmis.aika", {aika: kesto(r.aika_s)}));
     if ((r.ulkoiset_tekstitykset || []).length) lisat.push(t("valmis.tekstit", {t: r.ulkoiset_tekstitykset.join(", ")}));
     if (r.huomio) lisat.push(t("valmis.huomio." + r.huomio));
-    if (onKuva(x) && r.koko) lisat.unshift(t("valmis.koko", {w: r.koko[0], h: r.koko[1]}));
-    const napit = onKuva(x)
-      ? `<div class="toiminnot"><button class="painike toissijainen" id="nayta-kansio">${t("toiminto.nayta")}</button><button class="painike ensisijainen" id="avaa-kuva">${t("toiminto.avaa_kuva")}</button></div>`
-      : `<button class="painike ensisijainen" id="nayta-kansio">${t("toiminto.nayta")}</button>`;
-    tila = `<div class="valmis-kortti"><div><h3>${t("valmis.otsikko")}</h3><p>${esc(r.ulos)}</p>${lisat.map(l => `<p>${esc(l)}</p>`).join("")}</div>
-      ${napit}</div>`;
+    const napit = `<button class="painike ${onKuva(x) ? "toissijainen" : "ensisijainen"}" id="nayta-kansio">${t("toiminto.nayta")}</button>`
+      + (onKuva(x) ? `<button class="painike ensisijainen" id="avaa-kuva">${t("toiminto.avaa_kuva")}</button>` : "");
+    tila = `<div class="valmis-kortti"><div class="valmis-teksti"><h3>${t("valmis.otsikko")}</h3>
+        <p class="polku-rivi" title="${esc(r.ulos)}">${esc(r.ulos)}</p><p>${lisat.map(esc).join(" ")}</p></div>
+      <div class="toiminnot">${napit}</div></div>`;
   } else if (x.tila === "virhe" && x.virhe) {
     tila = `<div class="virhe-kortti"><h3>${t("virhe.otsikko")}</h3><p>${t("virhe." + x.virhe.avain)}</p></div>`;
   }
 
   if (!x.analyysi) {
-    return `${otsikko}${tila}<div class="vertailu"><div class="vertailu-tyhja"><div>${x.tila === "virhe" ? "" : t(onKuva(x) ? "vertailu.analysoidaan_kuva" : "vertailu.analysoidaan")}
-      ${x.tila === "virhe" ? "" : '<div class="edistys epamaarainen"><i></i></div>'}</div></div></div>`;
+    return `${otsikko}${tila}<div class="tyoalue ilman-paneelia"><div class="katselu"><div class="vertailu"><div class="vertailu-tyhja"><div>${x.tila === "virhe" ? "" : t(onKuva(x) ? "vertailu.analysoidaan_kuva" : "vertailu.analysoidaan")}
+      ${x.tila === "virhe" ? "" : '<div class="edistys epamaarainen"><i></i></div>'}</div></div></div></div></div>`;
   }
   const muokattava = !["kasitellaan", "jonossa", "valmis", "hd"].includes(x.tila) || (onKuva(x) && x.tila === "valmis");
-  return `${otsikko}${faktatHtml(x)}${tila}
-    <div class="tyoalue">
-      <div>
-        <div class="vertailu ${nk.zoom === "todellinen" ? "zoom" : ""}" id="vertailu">${vertailuHtml(x)}<div class="lataa-huntu"></div></div>
+  const paneeli = x.tila === "hd" ? "" : paneeliHtml(x, n, muokattava);
+  return `${otsikko}${tila}
+    <div class="tyoalue ${paneeli ? "" : "ilman-paneelia"}">
+      <div class="katselu">
+        <div class="vertailu ${nk.zoom === "todellinen" ? "zoom" : ""} ${x.koe && x.koe.siirretaan ? "laskee" : ""}" id="vertailu">${vertailuHtml(x)}<div class="lataa-huntu"></div></div>
         ${x.koe && x.koe.tila === "valmis" ? ohjaimetHtml(x) : ""}
       </div>
-      ${x.tila === "hd" ? "" : paneeliHtml(x, n, muokattava)}
+      ${paneeli}
     </div>`;
 }
 
@@ -367,14 +370,32 @@ function vertailuHtml(x) {
 function ohjaimetHtml(x) {
   const nk = nakyma(x.id);
   const nappi = (ryhma, arvo, teksti, val) => `<button type="button" data-${ryhma}="${arvo}" aria-pressed="${val === arvo}">${teksti}</button>`;
-  return `<div class="ohjaimet">
-    ${kohtienMaara(x) > 1 ? `<span class="ryhma" role="group" aria-label="${t("vertailu.kohta")}" title="${esc(t(onKuva(x) ? "vertailu.kohta_kuva" : "vertailu.kohta"))}">${Array.from({length: kohtienMaara(x)}, (_, i) => i + 1).map(k => nappi("kohta", String(k), String(k), String(nk.kohta))).join("")}</span>` : ""}
+  const kohdat = !onKuva(x) ? `<span class="ryhma" role="group" aria-label="${t("vertailu.kohta")}" title="${esc(t("vertailu.kohta"))}">${[1, 2, 3].map(k => nappi("kohta", String(k), String(k), String(nk.kohta))).join("")}</span>` : "";
+  return `<div class="ohjaimet">${kohdat}
     <span class="ryhma" role="group">${nappi("tila", "jakaja", t("vertailu.jakaja"), nk.tila)}${nappi("tila", "vuoro", t("vertailu.vuorottele"), nk.tila)}</span>
     <span class="ryhma" role="group">${nappi("zoom", "sovita", t("vertailu.sovita"), nk.zoom)}${nappi("zoom", "todellinen", t("vertailu.todellinen"), nk.zoom)}</span>
-    <span class="vali"></span>
-    ${onKuva(x) ? (kohtienMaara(x) > 1 ? `<span class="selite">${t("vertailu.alueet_kuva")}</span>` : "") : `<button type="button" class="painike toissijainen pieni" id="liike-nappi">${t("vertailu.liike")}</button>`}
-  </div>
-  <p class="selite vihjerivi" id="vertailu-vihje">${nk.tila === "vuoro" ? t("vertailu.vihje_vuoro") : t("vertailu.vihje_jakaja")}</p>`;
+    <span class="vihje" id="vertailu-vihje">${nk.tila === "vuoro" ? t("vertailu.vihje_vuoro") : t("vertailu.vihje_jakaja")}</span>
+    ${onKuva(x) ? "" : `<button type="button" class="painike toissijainen pieni" id="liike-nappi">${t("vertailu.liike")}</button>`}
+  </div>`;
+}
+
+function rajattuEsikatselu(x) {
+  const al = (x.koe && x.koe.alueet) || [];
+  return onKuva(x) && x.koe && x.koe.tila === "valmis" && al.some(a => a[2] < x.analyysi.leveys || a[3] < x.analyysi.korkeus);
+}
+function navigaattoriHtml(x) {
+  if (!rajattuEsikatselu(x)) return "";
+  const nk = nakyma(x.id), W = x.analyysi.leveys, H = x.analyysi.korkeus;
+  const pros = (a, b) => `${(100 * a / b).toFixed(3)}%`;
+  const alueet = x.koe.alueet.map((a, i) => {
+    // siirto kesken: merkki näytetään jo uudessa paikassa
+    if (x.koe.siirretaan === i + 1 && nk.siirto && nk.siirto.k === i + 1) a = [nk.siirto.x, nk.siirto.y, a[2], a[3]];
+    return `<button type="button" class="navi-alue ${nk.kohta === i + 1 ? "valittu" : ""}" data-navi="${i + 1}"
+      style="left:${pros(a[0], W)};top:${pros(a[1], H)};width:${pros(a[2], W)};height:${pros(a[3], H)}" title="${esc(t("navi.kohta", {k: i + 1}))}"><span>${i + 1}</span></button>`;
+  }).join("");
+  return `<div class="navi"><h3>${t("navi.otsikko")}</h3>
+    <div class="navi-kuva" id="navi" style="aspect-ratio:${W}/${H};width:min(100%, calc(190px * ${W} / ${H}))"><img src="${media(x.id, "yleis.png", String(x.lisatty))}" alt="">${alueet}</div>
+    <p class="selite">${t("navi.ohje", {k: nk.kohta})}</p></div>`;
 }
 
 function paneeliHtml(x, n, muokattava) {
@@ -385,7 +406,7 @@ function paneeliHtml(x, n, muokattava) {
     return `<label class="esivalinta ${i === n ? "valittu" : ""}" title="${esc(asetusKuvaus(x, i))}">
       <input type="radio" name="asetus" value="${i}" ${i === n ? "checked" : ""} ${muokattava ? "" : "disabled"}>
       <span class="n">${asetusNimi(x, i)}${i === suositus ? `<span class="merkki-suositus">${t("asetus.suositus")}</span>` : ""}</span>
-      <span class="aika num">${aika ? (aika < 60 ? kesto(aika) : t("asetus.aika", {aika: kesto(aika)})) : ""}</span>
+      <span class="aika num">${aika ? (aika < 60 ? (onKuva(x) ? t("kesto.s", {s: Math.max(1, Math.round(aika))}) : kesto(aika)) : t("asetus.aika", {aika: kesto(aika)})) : ""}</span>
       ${i === n ? `<span class="k">${asetusKuvaus(x, i)}</span>` : ""}</label>`;
   }).join("");
   const s = nk.saato;
@@ -398,25 +419,22 @@ function paneeliHtml(x, n, muokattava) {
   if (onKuva(x)) {
     const va = (x.geo && x.geo.vaihtoehdot) || {};
     const valittuSk = (x.geo && x.geo.skaala) || "2";
-    lisavalinta = `<div class="kuvasuhde"><label for="skaala">${t("koko.otsikko")}</label>
-      <select id="skaala" ${muokattava ? "" : "disabled"}>${["2", "4", "naytto"].filter(v => va[v]).map(v =>
-        `<option value="${v}" ${v === valittuSk ? "selected" : ""} ${va[v].ok ? "" : "disabled"}>${esc(skaalaTeksti(v, va[v].ow, va[v].oh))}${va[v].ok ? "" : " – " + t("koko.liian_suuri")}</option>`).join("")}</select>
-      <p class="selite">${t("koko.selite")}</p></div>`;
+    lisavalinta = `<div class="osio valinta-rivi"><label for="skaala">${t("koko.otsikko")}</label>
+      <select id="skaala" ${muokattava ? "" : "disabled"} title="${esc(t("koko.selite"))}">${["2", "4", "naytto"].filter(v => va[v]).map(v =>
+        `<option value="${v}" ${v === valittuSk ? "selected" : ""} ${va[v].ok ? "" : "disabled"}>${esc(skaalaTeksti(v, va[v].ow, va[v].oh))}${va[v].ok ? "" : " – " + t("koko.liian_suuri")}</option>`).join("")}</select></div>`;
   } else {
-    lisavalinta = `<div class="kuvasuhde"><label for="dar">${t("kuvasuhde.otsikko")}</label>
+    lisavalinta = `<div class="osio valinta-rivi"><label for="dar">${t("kuvasuhde.otsikko")}</label>
       <select id="dar" ${muokattava ? "" : "disabled"}>
         <option value="" ${!dar ? "selected" : ""}>${t("kuvasuhde.auto", {v: darAuto})}</option>
         <option value="4:3" ${dar === "4:3" ? "selected" : ""}>${t("kuvasuhde.43")}</option>
         <option value="16:9" ${dar === "16:9" ? "selected" : ""}>${t("kuvasuhde.169")}</option></select></div>`;
   }
-  return `<div class="paneeli">
-    <h3>${t("asetus.otsikko")}</h3>
-    <div class="esivalinnat" id="esivalinnat">${esivalinnat}</div>
-    <div class="saadot"><h3>${t("saato.otsikko")}</h3>
-      ${liuku("ai", s.ai ?? 1, 1, aiKaytossa)}${liuku(onKuva(x) ? "rae_kuva" : "rae", s.rae, 1.5)}${liuku("halo", s.halo, 1.5)}
-      <button type="button" class="painike haamu pieni palauta" id="palauta" ${muokattava ? "" : "disabled"}>${t("saato.palauta")}</button></div>
-    ${lisavalinta}
-  </div>`;
+  const saadot = `<div class="osio saadot"><div class="osio-otsikko"><h3>${t("saato.otsikko")}</h3>
+      <button type="button" class="linkki" id="palauta" ${muokattava ? "" : "disabled"}>${t("saato.palauta")}</button></div>
+      ${liuku("ai", s.ai ?? 1, 1, aiKaytossa)}${liuku(onKuva(x) ? "rae_kuva" : "rae", s.rae, 1.5)}${liuku("halo", s.halo, 1.5)}</div>`;
+  const asetukset = `<div class="osio"><h3>${t("asetus.otsikko")}</h3><div class="esivalinnat" id="esivalinnat">${esivalinnat}</div></div>`;
+  // kuvissa koko ja yleiskuva ensin (tärkeimmät valinnat), videoissa kuvasuhde lopussa (harvoin tarpeen)
+  return `<div class="paneeli">${onKuva(x) ? navigaattoriHtml(x) + lisavalinta + asetukset + saadot : asetukset + saadot + lisavalinta}</div>`;
 }
 
 function toimintoHtml(x) {
@@ -442,14 +460,14 @@ function saatoPoikkeaa(x, n, s) {
 let saatoAjastin = null;
 function paivitaKuvat(x, viive = 0) {
   const k = x.koe; if (!k || k.tila !== "valmis") return;
-  const nk = nakyma(x.id), n = nykyinenAsetus(x), tun = k.tunniste;
+  const nk = nakyma(x.id), n = nykyinenAsetus(x), tun = k.tunniste + "." + (k.versio || 0);
   const v = $("#kuva-v"), o = $("#kuva-o"); if (!v || !o) return;
-  v.src = media(x.id, `koe_${tun}/v1_k${nk.kohta}.png`, tun);
+  v.src = media(x.id, `koe_${k.tunniste}/v1_k${nk.kohta}.png`, tun);
   $("#lappu-o").textContent = saatoPoikkeaa(x, n, nk.saato) ? t("vertailu.saadot_lappu", {n: asetusNimi(x, n)}) : asetusNimi(x, n);
   $("#lappu-v").classList.toggle("nyt", nk.tila === "vuoro" && !nk.oikea);
   $("#lappu-o").classList.toggle("nyt", nk.tila === "vuoro" && nk.oikea);
-  if (!saatoPoikkeaa(x, n, nk.saato)) { o.src = media(x.id, `koe_${tun}/v${n}_k${nk.kohta}.png`, tun); return; }
-  const avain = JSON.stringify([n, nk.saato, nk.kohta]);
+  if (!saatoPoikkeaa(x, n, nk.saato)) { o.src = media(x.id, `koe_${k.tunniste}/v${n}_k${nk.kohta}.png`, tun); return; }
+  const avain = JSON.stringify([n, nk.saato, nk.kohta, k.versio || 0]);
   if (nk.saatoUrl[avain]) { o.src = media(x.id, nk.saatoUrl[avain], tun); return; }
   clearTimeout(saatoAjastin);
   saatoAjastin = setTimeout(async () => {
@@ -457,7 +475,7 @@ function paivitaKuvat(x, viive = 0) {
     try {
       const r = await api("saatokuva", {id: x.id, asetus: n, saato: nk.saato, k: nk.kohta});
       nk.saatoUrl[avain] = r.url;
-      if (JSON.stringify([nykyinenAsetus(x), nk.saato, nk.kohta]) === avain) $("#kuva-o").src = media(x.id, r.url, tun);
+      if (JSON.stringify([nykyinenAsetus(x), nk.saato, nk.kohta, k.versio || 0]) === avain) $("#kuva-o").src = media(x.id, r.url, tun);
     } catch (e) { /* ilmoitettu */ }
     $("#vertailu")?.classList.remove("laskee");
   }, viive);
@@ -468,11 +486,21 @@ function paivitaNayttamo(x) {
   st.classList.toggle("vuoro", nk.tila === "vuoro");
   st.classList.toggle("oikea-nakyy", nk.tila === "vuoro" && nk.oikea);
   const img = $("#kuva-o");
-  const sovita = () => { st.style.width = nk.zoom === "todellinen" && img.naturalWidth ? img.naturalWidth / devicePixelRatio + "px" : "100%"; };
-  img.onload = sovita; sovita();
+  img.onload = sovitaNayttamo; sovitaNayttamo();
   $("#lappu-v")?.classList.toggle("nyt", nk.tila === "vuoro" && !nk.oikea);
   $("#lappu-o")?.classList.toggle("nyt", nk.tila === "vuoro" && nk.oikea);
 }
+
+/* Sovita: koko kuva näkyy kerralla (leveys ja korkeus). 100 %: yksi kuvan pikseli = yksi näytön pikseli. */
+function sovitaNayttamo() {
+  const st = $("#nayttamo"), ve = $("#vertailu"), img = $("#kuva-o");
+  if (!st || !ve || !img || !img.naturalWidth || !valittu) return;
+  const nk = nakyma(valittu);
+  if (nk.zoom === "todellinen") { st.style.width = img.naturalWidth / devicePixelRatio + "px"; return; }
+  const s = Math.min((ve.clientWidth - 2) / img.naturalWidth, (ve.clientHeight - 2) / img.naturalHeight);
+  st.style.width = Math.max(40, Math.floor(img.naturalWidth * s)) + "px";
+}
+let vertailuSeuraaja = null;
 
 /* ------------------------------------------------------------ tapahtumat */
 function kytkeTyo(x) {
@@ -515,6 +543,30 @@ function kytkeTyo(x) {
   $$("[data-kohta]").forEach(b => b.addEventListener("click", () => { nakyma(id).kohta = Number(b.dataset.kohta); paivitaOhjaimet(id); }));
   $$("[data-tila]").forEach(b => b.addEventListener("click", () => { const nk = nakyma(id); nk.tila = b.dataset.tila; nk.oikea = true; paivitaOhjaimet(id); }));
   $$("[data-zoom]").forEach(b => b.addEventListener("click", () => { nakyma(id).zoom = b.dataset.zoom; $("#vertailu").classList.toggle("zoom", b.dataset.zoom === "todellinen"); paivitaOhjaimet(id); }));
+  if (vertailuSeuraaja) vertailuSeuraaja.disconnect();
+  if ($("#vertailu") && window.ResizeObserver) { vertailuSeuraaja = new ResizeObserver(() => sovitaNayttamo()); vertailuSeuraaja.observe($("#vertailu")); }
+  $("#navi")?.addEventListener("click", e => {
+    const nk = nakyma(id);
+    const alue = e.target.closest("[data-navi]");
+    if (alue) {
+      nk.kohta = Number(alue.dataset.navi);
+      $$(".navi-alue").forEach(b => b.classList.toggle("valittu", b === alue));
+      $(".navi .selite").textContent = t("navi.ohje", {k: nk.kohta});
+      paivitaOhjaimet(id); return;
+    }
+    const xx = TILA.jono.tyot.find(y => y.id === id); if (!xx || !xx.koe || xx.koe.siirretaan) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width * xx.analyysi.leveys, py = (e.clientY - r.top) / r.height * xx.analyysi.korkeus;
+    const valittuAlue = $(`.navi-alue[data-navi="${nk.kohta}"]`), a = xx.koe.alueet[nk.kohta - 1];
+    if (valittuAlue && a) {   // siirretään merkki heti, kuvat päivittyvät kun ne on laskettu
+      const W = xx.analyysi.leveys, H = xx.analyysi.korkeus;
+      nk.siirto = {k: nk.kohta, x: Math.max(0, Math.min(W - a[2], px - a[2] / 2)), y: Math.max(0, Math.min(H - a[3], py - a[3] / 2))};
+      valittuAlue.style.left = `${100 * nk.siirto.x / W}%`;
+      valittuAlue.style.top = `${100 * nk.siirto.y / H}%`;
+    }
+    $("#vertailu")?.classList.add("laskee");
+    api("alue", {id, k: nk.kohta, x: px, y: py}).then(hae).catch(() => {});
+  });
   $("#liike-nappi")?.addEventListener("click", () => {
     const xx = TILA.jono.tyot.find(y => y.id === id), nk = nakyma(id), n = nykyinenAsetus(xx);
     const saato = saatoPoikkeaa(xx, n, nk.saato) ? nk.saato : null;

@@ -70,6 +70,7 @@ class Jono:
                 t["tila"] = "odottaa" if t.get("laji") == "kuva" else "keskeytetty"
             t["koe"] = {k: v for k, v in (t.get("koe") or {}).items() if k != "tila"} | {"tila": (
                 "valmis" if (t.get("koe") or {}).get("tunniste") else "ei")}
+            t["koe"].pop("siirretaan", None)
             t["liike"] = {}
             t.pop("edistys", None)
             self.tyot.append(t)
@@ -256,6 +257,15 @@ class Jono:
             t = self._tyo(tid)
             t["liike"] = {"tila": "jonossa", "edistys": 0, "asetus": asetus, "saato": saato}
         self._koe_q.put(("liike", tid, (asetus, saato)))
+
+    def alue(self, tid, k, x, y):
+        """Kuvan esikatselualueen siirto (yleiskuvasta valittu kohta)."""
+        with self.lukko:
+            t = self._tyo(tid)
+            if t.get("laji") != "kuva" or (t.get("koe") or {}).get("tila") != "valmis":
+                return
+            t["koe"]["siirretaan"] = int(k)
+        self._koe_q.put(("alue", tid, (int(k), float(x), float(y))))
 
     def saatokuva(self, tid, asetus, saato, k):
         with self.lukko:
@@ -455,6 +465,29 @@ class Jono:
                 self._sammuta()
             self._herata.set()
 
+    def _siirra_alue(self, tid, k, x, y):
+        try:
+            with self.lukko:
+                t = self._tyo(tid)
+                polku, an, geo, wd = Path(t["polku"]), t["analyysi"], t["geo"], self._wd(t)
+                koe = t["koe"]
+            alueet = kuvat.siirra_alue(polku, an, geo, wd, self._laite("esikatselu"), k, x, y)
+            with self.lukko:
+                if t.get("koe") is koe:
+                    koe["alueet"] = alueet
+                    koe["versio"] = int(time.time() * 1000)
+        except KeyError:
+            return
+        except Exception:  # noqa: BLE001
+            m.loki(f"Alueen siirto epäonnistui: {traceback.format_exc()}")
+        finally:
+            with self.lukko:
+                try:
+                    self._tyo(tid).get("koe", {}).pop("siirretaan", None)
+                except KeyError:
+                    pass
+        self._tallenna()
+
     def _kasittele_kuva(self, tid):
         with self.lukko:
             try:
@@ -532,6 +565,8 @@ class Jono:
                 time.sleep(1)
             if laji == "kuva":
                 return self._kasittele_kuva(tid)
+            if laji == "alue":
+                return self._siirra_alue(tid, *param)
             try:
                 with self.lukko:
                     t = self._tyo(tid)

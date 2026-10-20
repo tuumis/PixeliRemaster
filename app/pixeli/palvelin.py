@@ -100,6 +100,9 @@ class Sovellus:
         if polku == "esikatsele":
             j.esikatsele(d["id"])
             return {}
+        if polku == "alue":
+            j.alue(d["id"], d.get("k", 1), d["x"], d["y"])
+            return {}
         if polku == "saatokuva":
             return {"url": j.saatokuva(d["id"], d["asetus"], d.get("saato"), d.get("k", 2))}
         if polku == "liike":

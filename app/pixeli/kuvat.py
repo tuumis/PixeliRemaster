@@ -254,11 +254,11 @@ def ruudukolle(rgb, alfa01):
     return np.clip(rgb.astype(np.float32) * a + tausta * (1 - a) + 0.5, 0, 255).astype(np.uint8)
 
 
-def _pikkukuva(polku, rgb, alfa=None):
+def _pikkukuva(polku, rgb, alfa=None, koko=(192, 120)):
     if alfa is not None:
         rgb = ruudukolle(rgb, alfa.astype(np.float32) / 255.0)
     h, w, _ = rgb.shape
-    k = max(1, int(math.ceil(max(w / 192, h / 120))))
+    k = max(1, int(math.ceil(max(w / koko[0], h / koko[1]))))
     hh, ww = h // k * k, w // k * k
     pieni = rgb[:hh, :ww].reshape(hh // k, k, ww // k, k, 3).mean(axis=(1, 3))
     m.tallenna_png(polku, (pieni + 0.5).astype(np.uint8))
@@ -266,9 +266,9 @@ def _pikkukuva(polku, rgb, alfa=None):
 
 def analysoi_kuva(src: Path, wd: Path):
     st = src.stat()
-    avain = [st.st_size, int(st.st_mtime), m.VERSIO, "kuva", 2]
+    avain = [st.st_size, int(st.st_mtime), m.VERSIO, "kuva", 3]
     vanha = m.lue_json(wd / "analyysi.json")
-    if vanha and vanha.get("avain") == avain and (wd / "pikku.png").exists():
+    if vanha and vanha.get("avain") == avain and (wd / "pikku.png").exists() and (wd / "yleis.png").exists():
         return vanha
     m.loki(f"Analysoidaan kuva {src.name}")
     p = m.aja([m.ffbin("ffprobe"), "-v", "error", "-print_format", "json", "-show_streams", src])
@@ -298,6 +298,7 @@ def analysoi_kuva(src: Path, wd: Path):
     rgb, alfa = pura(src, an)
     h, w, _ = rgb.shape
     _pikkukuva(wd / "pikku.png", rgb, alfa)
+    _pikkukuva(wd / "yleis.png", rgb, alfa, (720, 540))          # yleiskuva esikatselualueiden valintaan
 
     # suositus: piirrokset (vähän värejä häviöttömässä tiedostossa), pakatut/pienet, muut valokuvia
     askel = max(1, int(math.sqrt(w * h / 1_000_000)))
@@ -401,19 +402,34 @@ def _alue_koko(alue, geo):
     return max(1, int(round(alue[3] * s))), max(1, int(round(alue[2] * s)))
 
 
+def _koko_kuva(src, an, kd):
+    """Purettu lähdekuva välimuistista (alueiden siirtoa varten)."""
+    p, pa = kd / "koko.npy", kd / "koko_alfa.npy"
+    if p.exists():
+        return np.load(p, mmap_mode="r"), (np.load(pa, mmap_mode="r") if pa.exists() else None)
+    rgb, alfa = pura(src, an)
+    np.save(p, rgb)
+    if alfa is not None:
+        np.save(pa, alfa)
+    return rgb, alfa
+
+
+def _tallenna_lahdealue(kd, i, rgb, alfa, alue):
+    x, y, aw, ah = alue
+    osa = np.ascontiguousarray(rgb[y:y + ah, x:x + aw])[None]
+    np.save(kd / f"lahde_{i}.npy", osa)
+    if alfa is not None:
+        np.save(kd / f"alfa_{i}.npy", np.ascontiguousarray(alfa[y:y + ah, x:x + aw]))
+    return osa
+
+
 def lahdealueet(src, an, geo, kd):
     tiedot = m.lue_json(kd / "alueet.json")
     if tiedot and all((kd / f"lahde_{i}.npy").exists() for i in range(1, len(tiedot) + 1)):
         return tiedot, [np.load(kd / f"lahde_{i}.npy") for i in range(1, len(tiedot) + 1)]
-    rgb, alfa = pura(src, an)
-    alueet = esikatselualueet(rgb, geo)
-    kuvat = []
-    for i, (x, y, aw, ah) in enumerate(alueet, 1):
-        osa = np.ascontiguousarray(rgb[y:y + ah, x:x + aw])[None]
-        np.save(kd / f"lahde_{i}.npy", osa)
-        if alfa is not None:
-            np.save(kd / f"alfa_{i}.npy", np.ascontiguousarray(alfa[y:y + ah, x:x + aw]))
-        kuvat.append(osa)
+    rgb, alfa = _koko_kuva(src, an, kd)
+    alueet = esikatselualueet(np.asarray(rgb), geo)
+    kuvat = [_tallenna_lahdealue(kd, i, rgb, alfa, a) for i, a in enumerate(alueet, 1)]
     m.kirjoita_json(kd / "alueet.json", alueet)
     return alueet, kuvat
 
@@ -423,7 +439,7 @@ def _tallenna_esikatselu(polku, kd, i, rgb_u8, _valimuisti={}):
     ap = kd / f"alfa_{i}.npy"
     if ap.exists():
         h, w, _ = rgb_u8.shape
-        avain = (str(ap), h, w)
+        avain = (str(ap), ap.stat().st_mtime_ns, h, w)
         if avain not in _valimuisti:
             _valimuisti.clear()
             _valimuisti[avain] = skaalaa_alfa(np.load(ap), h, w)
@@ -468,13 +484,44 @@ def koekuvat_kuva(src, an, geo, wd, L, edistys=None, peruuta=None):
     return tiedot
 
 
+def siirra_alue(src, an, geo, wd, L, k, cx, cy, edistys=None):
+    """Siirtää esikatselualueen k kohtaan (cx, cy) (lähteen pikseleinä, alueen keskipiste) ja laskee
+    sen vertailukuvat kaikilla asetuksilla. Palauttaa päivitetyt alueet."""
+    tun = koe_tunniste(geo)
+    kd = wd / f"koe_{tun}"
+    alueet, _ = lahdealueet(src, an, geo, kd)
+    k = max(1, min(len(alueet), int(k)))
+    _, _, aw, ah = alueet[k - 1]
+    w, h = an["leveys"], an["korkeus"]
+    x = int(max(0, min(w - aw, round(float(cx) - aw / 2)))) // 2 * 2
+    y = int(max(0, min(h - ah, round(float(cy) - ah / 2)))) // 2 * 2
+    alueet[k - 1] = [x, y, aw, ah]
+    rgb, alfa = _koko_kuva(src, an, kd)
+    osa = _tallenna_lahdealue(kd, k, rgb, alfa, alueet[k - 1])
+    oh, ow = _alue_koko(alueet[k - 1], geo)
+    for j, n in enumerate(m.ASETUKSET, 1):
+        with L.lukko, L.inferenssi():
+            ketju = kuva.Ketju(L.ops, ah, aw, oh, ow, asetus_kuva(L, n, None, geo), yuv=False)
+            rgb_o = ketju.rgb_lopullinen(L.ops.from_uint8(osa), 1000 * k)
+            _tallenna_esikatselu(kd / f"v{n}_k{k}.png", kd, k, L.ops.uint8_hwc(rgb_o))
+            del rgb_o, ketju
+            L.tyhjenna()
+        if edistys:
+            edistys(j, len(m.ASETUKSET))
+    m.kirjoita_json(kd / "alueet.json", alueet)
+    tiedot = m.lue_json(kd / "koe.json", {}) or {}
+    tiedot["alueet"] = alueet
+    m.kirjoita_json(kd / "koe.json", tiedot)
+    return alueet
+
+
 def saatokuva_kuva(src, an, geo, wd, L, n, saato, k):
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
     kd.mkdir(parents=True, exist_ok=True)
     alueet, kuvat = lahdealueet(src, an, geo, kd)
     k = max(1, min(len(kuvat), int(k)))
-    avain = hashlib.sha1(json.dumps([n, saato, k], sort_keys=True).encode()).hexdigest()[:10]
+    avain = hashlib.sha1(json.dumps([n, saato, k, alueet[k - 1]], sort_keys=True).encode()).hexdigest()[:10]
     nimi = f"s_{avain}.png"
     if not (kd / nimi).exists():
         oh, ow = _alue_koko(alueet[k - 1], geo)
