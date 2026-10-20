@@ -399,6 +399,35 @@ class NumpyOps:
         p = np.pad(x, ((0, 0), (0, 0), (1, 0), (1, 0)), mode="edge")
         return (p[:, :, :-1, :-1] + p[:, :, 1:, :-1] + p[:, :, :-1, 1:] + p[:, :, 1:, 1:]) * 0.25
 
+    # --- monikuvamalli (vsr.py)
+    def warp(self, x, flow, reuna="zeros"):
+        """F.grid_sample(bilinear, align_corners=True); virtaus (n,2,h,w) pikseleinä (x, y)."""
+        n, c, h, w = x.shape
+        gy, gx = np.meshgrid(np.arange(h, dtype=np.float32), np.arange(w, dtype=np.float32), indexing="ij")
+        px = gx[None] + flow[:, 0]
+        py = gy[None] + flow[:, 1]
+        if reuna == "border":
+            px, py = np.clip(px, 0, w - 1), np.clip(py, 0, h - 1)
+        x0, y0 = np.floor(px).astype(np.int64), np.floor(py).astype(np.int64)
+        lx, ly = (px - x0).astype(np.float32), (py - y0).astype(np.float32)
+        out = np.zeros_like(x)
+        for dy, wy in ((0, 1 - ly), (1, ly)):
+            for dx, wx in ((0, 1 - lx), (1, lx)):
+                xi, yi = x0 + dx, y0 + dy
+                ok = (xi >= 0) & (xi < w) & (yi >= 0) & (yi < h)
+                xc, yc = np.clip(xi, 0, w - 1), np.clip(yi, 0, h - 1)
+                paino = (wy * wx * ok).astype(np.float32)
+                for b in range(n):
+                    out[b] += x[b][:, yc[b], xc[b]] * paino[b][None]
+        return out
+
+    def avgpool2(self, x):
+        n, c, h, w = x.shape
+        return x[:, :, :h // 2 * 2, :w // 2 * 2].reshape(n, c, h // 2, 2, w // 2, 2).mean((3, 5))
+
+    def keskiabs(self, x):
+        return float(np.abs(x).mean())
+
 
 # ============================================================== ops: torch
 
@@ -628,6 +657,28 @@ class TorchOps:
 
     def sumennus2(self, x):
         return self.F.avg_pool2d(self.F.pad(x, (1, 0, 1, 0), mode="replicate"), 2, stride=1)
+
+    # --- monikuvamalli (vsr.py)
+    def warp(self, x, flow, reuna="zeros"):
+        torch = self.torch
+        n, c, h, w = x.shape
+        flow = flow.float()
+        avain = (h, w, flow.device)
+        if getattr(self, "_ruudukko", (None,))[0] != avain:
+            gy, gx = torch.meshgrid(torch.arange(h, device=flow.device, dtype=torch.float32),
+                                    torch.arange(w, device=flow.device, dtype=torch.float32), indexing="ij")
+            self._ruudukko = (avain, gx, gy)
+        _, gx, gy = self._ruudukko
+        px = (gx + flow[:, 0]) * (2.0 / max(w - 1, 1)) - 1.0
+        py = (gy + flow[:, 1]) * (2.0 / max(h - 1, 1)) - 1.0
+        g = torch.stack([px, py], dim=3)
+        return self.F.grid_sample(x.float(), g, mode="bilinear", padding_mode=reuna, align_corners=True).to(x.dtype)
+
+    def avgpool2(self, x):
+        return self.F.avg_pool2d(x, 2, 2)
+
+    def keskiabs(self, x):
+        return float(x.float().abs().mean())
 
 
 # ============================================================== skaalausmatriisit

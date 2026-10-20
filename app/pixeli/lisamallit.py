@@ -58,6 +58,15 @@ LUETTELO = {
         "muunnos": "generaattori",
         "kuvaus": "Big LaMa (Suvorov ym., Samsung AI), Apache 2.0",
     },
+    "monikuva": {
+        "tiedosto": "realbasicvsr_ema.pth",
+        "koko": None,
+        "sha256": None,
+        "lahde": "https://download.openmmlab.com/mmediting/restorers/real_basicvsr/"
+                 "realbasicvsr_c64b20_1x30x8_lr5e-5_150k_reds_20211104-52f77c2c.pth",
+        "muunnos": "generator_ema",
+        "kuvaus": "RealBasicVSR (Chan ym., OpenMMLab), Apache 2.0",
+    },
     "vari": {
         "tiedosto": "ddcolor_modelscope_fp16.pth",
         "koko": 456060711,

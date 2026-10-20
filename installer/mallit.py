@@ -7,6 +7,7 @@ kansioon, josta ne ladataan julkaisuun.
 Muunnokset (tarvitsevat PyTorchin):
   model_state   tarkistuspisteestä vain mallin painot (ilman optimoijan tilaa)
   generaattori  PyTorch Lightning -tarkistuspisteestä vain "generator."-alkuiset painot
+  generator_ema mmediting-tarkistuspisteestä vain EMA-generaattorin painot (ilman diskriminaattoria)
   fp16          painot puolitarkkuuteen (puolittaa latauksen koon; lasketaan silti fp32:na)
 
 Jos luettelon koko/sha256 puuttuu (uusi malli), arvot tulostetaan luetteloon lisättäviksi.
@@ -56,6 +57,8 @@ def muunna(lahde, kohde, muunnos):
         sd = ck["model_state"]
     elif muunnos == "generaattori":
         sd = {k[len("generator."):]: v for k, v in ck["state_dict"].items() if k.startswith("generator.")}
+    elif muunnos == "generator_ema":
+        sd = {k[len("generator_ema."):]: v for k, v in ck["state_dict"].items() if k.startswith("generator_ema.")}
     elif muunnos == "fp16":
         sd = ck.get("params", ck) if isinstance(ck, dict) else ck
         sd = {k: (v.half() if torch.is_tensor(v) and v.is_floating_point() else v) for k, v in sd.items()}
