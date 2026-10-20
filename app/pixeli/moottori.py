@@ -41,6 +41,8 @@ WORK = DATA / "tyo"
 TOOLS = DATA / "ffmpeg"
 LOKI = DATA / "loki.txt"
 OSAN_PITUUS_S = 300                    # käsittely 5 min osissa (jatkaminen)
+# pythonw.exe:stä käynnistetyt komentoriviohjelmat avaisivat muuten oman konsoli-ikkunan
+PIILOTA = 0x08000000 if os.name == "nt" else 0          # CREATE_NO_WINDOW
 
 MALLITIEDOSTOT = {
     "live": "2xLiveActionV1_SPAN_490000.pth",
@@ -171,15 +173,17 @@ def pysy_hereilla(paalla=True):
 
 
 def nayton_resoluutio():
-    """Päänäytön todellinen resoluutio (Windows). Muualla oletus 2560x1440."""
+    """Päänäytön fyysinen resoluutio (Windows), Windowsin skaalauksesta (esim. 125 %) riippumatta.
+    Muualla oletus 2560x1440."""
     if os.name == "nt":
         try:
             import ctypes
+            user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+            hdc = user32.GetDC(0)
             try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(2)
-            except Exception:  # noqa: BLE001
-                ctypes.windll.user32.SetProcessDPIAware()
-            w, h = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+                w, h = gdi32.GetDeviceCaps(hdc, 118), gdi32.GetDeviceCaps(hdc, 117)   # DESKTOPHORZRES/VERTRES
+            finally:
+                user32.ReleaseDC(0, hdc)
             if w >= 640 and h >= 480:
                 return int(w) // 2 * 2, int(h) // 2 * 2
         except Exception:  # noqa: BLE001
@@ -188,7 +192,7 @@ def nayton_resoluutio():
 
 
 def aja(cmd):
-    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
+    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True, creationflags=PIILOTA,
                           encoding="utf-8", errors="replace")
 
 
@@ -288,7 +292,7 @@ def analysoi(src: Path, wd: Path):
         cmd += ["-i", src, "-map", "0:v:0", "-an", "-sn", "-dn",
                 "-vf", "idet,cropdetect=limit=24:round=2:reset=0,scale=64:48:flags=area,format=gray",
                 "-frames:v", "250", "-f", "rawvideo", "-"]
-        r = subprocess.run([str(c) for c in cmd], capture_output=True)
+        r = subprocess.run([str(c) for c in cmd], capture_output=True, creationflags=PIILOTA)
         e = r.stderr.decode("utf-8", "replace")
         kehykset.append(np.frombuffer(r.stdout, np.uint8)[: len(r.stdout) // 3072 * 3072]
                         .reshape(-1, 48, 64).astype(np.float32))
@@ -460,8 +464,8 @@ def aja_osa(src, an, geo, ketju, ops, ulos, alku, maara, muoto, lokit, png=None,
     lokit.mkdir(parents=True, exist_ok=True)
     dek_log = open(lokit / "purku.log", "w", encoding="utf-8", errors="replace")
     enk_log = open(lokit / "pakkaus.log", "w", encoding="utf-8", errors="replace")
-    dp = subprocess.Popen([str(c) for c in dek], stdout=subprocess.PIPE, stderr=dek_log)
-    ep = subprocess.Popen([str(c) for c in enk], stdin=subprocess.PIPE, stderr=enk_log)
+    dp = subprocess.Popen([str(c) for c in dek], stdout=subprocess.PIPE, stderr=dek_log, creationflags=PIILOTA)
+    ep = subprocess.Popen([str(c) for c in enk], stdin=subprocess.PIPE, stderr=enk_log, creationflags=PIILOTA)
 
     koko = cw * ch * 3
     q_in, q_out = queue.Queue(8), queue.Queue(6)
@@ -830,7 +834,8 @@ def lahdekuvat(src, an, geo, kd):
                 r = subprocess.run([ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
                                     "-ss", f"{max(0.0, t):.3f}", "-i", str(src), "-map", "0:v:0",
                                     "-an", "-sn", "-dn", "-vf", kuvasuodin(an, geo), "-frames:v", "1",
-                                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
+                                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True,
+                                   creationflags=PIILOTA)
                 data = r.stdout
                 if len(data) >= cw * ch * 3:
                     break

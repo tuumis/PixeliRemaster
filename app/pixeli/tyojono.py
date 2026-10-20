@@ -248,7 +248,7 @@ class Jono:
 
     def peru_sammutus(self):
         if self.sammutus_ajastettu and os.name == "nt":
-            subprocess.run(["shutdown", "/a"], capture_output=True)
+            subprocess.run(["shutdown", "/a"], capture_output=True, creationflags=m.PIILOTA)
         self.sammutus_ajastettu = False
         self.sammuta_valmiina = False
 
@@ -416,7 +416,7 @@ class Jono:
         self.sammutus_ajastettu = True
         m.loki("Jono valmis – kone sammutetaan 2 minuutin kuluttua.")
         if os.name == "nt":
-            subprocess.run(["shutdown", "/s", "/t", "120", "/c", "PixeliRemaster: jono valmis"],
+            subprocess.run(["shutdown", "/s", "/t", "120", "/c", "PixeliRemaster: jono valmis"], creationflags=m.PIILOTA,
                            capture_output=True)
 
     def _koe_saie(self):
