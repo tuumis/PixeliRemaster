@@ -54,6 +54,8 @@ class Sovellus:
         def esi(kuva):
             tulos = {}
             for n, a in m.ASETUKSET.items():
+                if kuva and n not in m.KUVA_ASETUKSET:
+                    continue
                 a = dict(a, **(kuvat.KUVA_MUUTOKSET if kuva else {}))
                 tulos[str(n)] = {"ai": a.get("ai", 1.0) if a.get("malli") else None, "rae": a.get("rae", 0.0),
                                  "halo": a.get("halo", 0.0), "kohina": a.get("kohina", 0.0), "malli": a.get("malli")}

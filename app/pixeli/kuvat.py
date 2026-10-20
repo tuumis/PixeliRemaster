@@ -537,16 +537,16 @@ def koekuvat_kuva(src, an, geo, wd, L, edistys=None, peruuta=None):
     kd = wd / f"koe_{tun}"
     kd.mkdir(parents=True, exist_ok=True)
     korjaus_osuus = 3 if _korjaukset(geo) and not (kd / "koko.npy").exists() else 0
-    vaiheet_arvio = len(m.ASETUKSET) * 3 + korjaus_osuus
+    vaiheet_arvio = len(m.KUVA_ASETUKSET) * 3 + korjaus_osuus
     alueet, kuvat = lahdealueet(src, an, geo, kd, L, (lambda f: edistys(int(f * korjaus_osuus), vaiheet_arvio))
                                 if edistys and korjaus_osuus else None)
     mt = mittaa_kuva(src, an, geo, wd)
     ol = mt["oletukset"]
     oh, ow = _alue_koko(alueet[0], geo)
-    vaiheet = len(m.ASETUKSET) * len(kuvat) + korjaus_osuus
+    vaiheet = len(m.KUVA_ASETUKSET) * len(kuvat) + korjaus_osuus
     tehty = korjaus_osuus
     aika = {}
-    for n in m.ASETUKSET:
+    for n in m.KUVA_ASETUKSET:
         with L.lukko:
             ketju = kuva.Ketju(L.ops, alueet[0][3], alueet[0][2], oh, ow, asetus_kuva(L, n, ol.get(str(n)), geo),
                                yuv=False)
@@ -591,7 +591,7 @@ def siirra_alue(src, an, geo, wd, L, k, cx, cy, edistys=None):
     osa = _tallenna_lahdealue(kd, k, rgb, alfa, alueet[k - 1])
     oh, ow = _alue_koko(alueet[k - 1], geo)
     ol = mittaa_kuva(src, an, geo, wd)["oletukset"]
-    for j, n in enumerate(m.ASETUKSET, 1):
+    for j, n in enumerate(m.KUVA_ASETUKSET, 1):
         with L.lukko, L.inferenssi():
             ketju = kuva.Ketju(L.ops, ah, aw, oh, ow, asetus_kuva(L, n, ol.get(str(n)), geo), yuv=False)
             rgb_o = ketju.rgb_lopullinen(L.ops.from_uint8(osa), 1000 * k)
@@ -599,7 +599,7 @@ def siirra_alue(src, an, geo, wd, L, k, cx, cy, edistys=None):
             del rgb_o, ketju
             L.tyhjenna()
         if edistys:
-            edistys(j, len(m.ASETUKSET))
+            edistys(j, len(m.KUVA_ASETUKSET))
     m.kirjoita_json(kd / "alueet.json", alueet)
     tiedot = m.lue_json(kd / "koe.json", {}) or {}
     tiedot["alueet"] = alueet

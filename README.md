@@ -48,6 +48,7 @@ JPEG-, PNG-, HEIC- (iPhone), WebP-, BMP- ja TIFF-kuvat käsitellään samalla te
 | Heikko lähde | Pakattu kuva | Netistä ladatut, AVI-tiedostot, TV-tallenteet, voimakkaasti pakatut kuvat |
 | VHS / pehmeä | Pehmeä / vanha | Hyvin heikot, haamuiset ja epätarkat lähteet (hidas) |
 | Piirretty | Piirros | Animaatio, piirrokset, sarjakuvat ja logot |
+| Terävin – kokeellinen | – | Monikuvamalli (RealBasicVSR): taustat ja tekstuurit selvästi tarkemmiksi naapurikuvien avulla. Liikkuvissa kasvoissa voi näkyä repeämiä; hyvin hidas |
 
 ## Miten se toimii
 

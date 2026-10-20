@@ -1,3 +1,6 @@
+**Uutta 1.4.0:** videoille uusi asetus "Terävin – kokeellinen": monikuvamalli (RealBasicVSR) hakee tarkkuutta naapurikuvista, joten taustat ja tekstuurit tarkentuvat selvästi. Kohtausten vaihdot tunnistetaan, ja esikatselu laskee naapurikuvat mukaan. Nopeasti liikkuvissa kasvoissa voi näkyä repeämiä, ja käsittely on hyvin hidasta – tavallinen asetus on edelleen suositus.
+**New in 1.4.0:** a new video preset "Sharpest – experimental": a multi-frame model (RealBasicVSR) gathers detail from neighboring frames, making backgrounds and textures clearly sharper. Scene changes are detected and the preview includes neighboring frames. Fast-moving faces may show tearing and processing is very slow – the regular presets remain the recommendation.
+
 **Uutta 1.3.0:** vanhojen valokuvien korjaus: naarmujen, taitteiden ja pölyn poisto sekä mustavalkoisten ja seepiakuvien väritys tekoälyllä (kirkkaus ja yksityiskohdat säilyvät alkuperäisinä). Ohjelma huomaa mustavalkoisen kuvan ja ehdottaa väritystä.
 **New in 1.3.0:** old photo restoration: removing scratches, creases and dust, and colorizing black-and-white and sepia photos with AI (brightness and detail stay as in the original). The program notices black-and-white photos and suggests colorizing them.
 

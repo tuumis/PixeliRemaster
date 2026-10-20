@@ -6,6 +6,8 @@ ja uint8-muunnos. Jos ffmpeg on käytettävissä, ajetaan lisäksi koko kuvan k�
 (EXIF-suunta, JPEG- ja PNG-tallennus, läpinäkyvyys) Windowsissa.
 """
 import os
+import shutil
+from fractions import Fraction
 import sys
 import tempfile
 import traceback
@@ -314,4 +316,100 @@ xv_p = np.repeat(m.testikuva(64, 64)[:, :1], 3, axis=1)
 e2 = float(np.abs(vr.DDColor(on, sd_vn)(xv_p) - ot.numpy(vr.DDColor(ot, sd_vn)(ot.tensor(xv_p)))).max())
 print(f"::notice title=torchtesti::DDColor numpy vs torch: {e2:.2e}")
 assert e2 < 0.5, e2
+
+# 10) monikuvamalli (RealBasicVSR) vastaa mmagicin alkuperäistä koodia (riippuvuudet tyngillä)
+import re  # noqa: E402
+from pixeli import vsr as vs  # noqa: E402
+mma = Path(tempfile.mkdtemp(prefix="mmagic_"))
+subprocess.run(["git", "clone", "-q", "--depth", "1", "--filter=blob:none", "--sparse",
+                "https://github.com/open-mmlab/mmagic", str(mma)], check=True)
+subprocess.run(["git", "-C", str(mma), "sparse-checkout", "set", "mmagic/models/archs", "mmagic/models/utils",
+                "mmagic/models/editors/basicvsr", "mmagic/models/editors/real_basicvsr"], check=True)
+import torch.nn as nn  # noqa: E402
+
+
+class ConvModule(nn.Module):          # mmcv.cnn.ConvModule ilman normalisointia (kuten SPyNetissä)
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, norm_cfg=None,
+                 act_cfg=dict(type="ReLU"), **k):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=True)
+        self.activate = nn.ReLU() if act_cfg else None
+
+    def forward(self, x):
+        x = self.conv(x)
+        return self.activate(x) if self.activate is not None else x
+
+
+class BaseModule(nn.Module):
+    def __init__(self, init_cfg=None, **k):
+        super().__init__()
+
+
+nimet = {"ConvModule": ConvModule, "BaseModule": BaseModule, "load_checkpoint": lambda *a, **k: None,
+         "print_log": lambda *a, **k: None, "default_init_weights": lambda *a, **k: None,
+         "MMLogger": types.SimpleNamespace(get_current_instance=lambda: None),
+         "MODELS": types.SimpleNamespace(register_module=lambda *a, **k: (lambda c: c)),
+         "make_layer": lambda block, n, **kw: nn.Sequential(*[block(**kw) for _ in range(n)]),
+         "__name__": "mmagic_tynka"}
+for tiedosto in ("models/utils/flow_warp.py", "models/archs/sr_backbone.py", "models/archs/upsample.py",
+                 "models/editors/basicvsr/basicvsr_net.py", "models/editors/real_basicvsr/real_basicvsr_net.py"):
+    koodi = (mma / "mmagic" / tiedosto).read_text(encoding="utf-8")
+    koodi = re.sub(r"^(from (mmcv|mmengine|mmagic|\.\.?)[^\n]*)$", r"# \1", koodi, flags=re.M)
+    exec(compile(koodi, tiedosto, "exec"), nimet)
+vk = lisamallit.varmista("monikuva")
+rb = nimet["RealBasicVSRNet"](mid_channels=64, num_propagation_blocks=20, num_cleaning_blocks=20,
+                              dynamic_refine_thres=255, spynet_pretrained=None)
+rb.load_state_dict(torch.load(vk, map_location="cpu"), strict=True)
+rb.eval()
+kuvat_v = [np.roll(m.testikuva(64, 96), (k, 2 * k), (2, 3)) for k in range(4)]
+viite_r = rb(torch.from_numpy(np.stack(kuvat_v, 1))).numpy()[0]
+sd_r = kuva.lataa_pth(vk)
+for nimi_, ops_ in (("torch", ot), ("numpy", on)):
+    oma = vs.RealBasicVSR(ops_, sd_r)([ops_.tensor(x) for x in kuvat_v])
+    e = max(float(np.abs(ops_.numpy(a_)[0] - viite_r[i]).max()) for i, a_ in enumerate(oma))
+    print(f"::notice title=torchtesti::RealBasicVSR {nimi_}: suurin ero {e:.2e} (alkuperäinen)")
+    assert e < 2e-3, e
+
+
+# monikuvaketju: kaikki kuvat järjestyksessä täsmälleen kerran, myös kohtauksen vaihtuessa
+class _Vale:
+    def _h(self, x):
+        return x
+
+    def __call__(self, lrs, kasittele=None):
+        for i, x in enumerate(lrs):
+            kasittele(i, np.repeat(np.repeat(x, 4, 2), 4, 3))
+
+
+for leik in (None, 37):
+    mk = vs.MonikuvaKetju(on, 16, 24, 64, 96, {"monikuva": _Vale(), "ai": 1.0, "rae": 0.0}, yuv=False)
+    ulos = []
+    for i in range(0, 100, 3):
+        xb = np.concatenate([np.full((1, 3, 16, 24), 0.2, np.float32) for _ in range(i, min(100, i + 3))])
+        for j_, j in enumerate(range(i, min(100, i + 3))):
+            xb[j_, :, :, :4] = 0.9 if (leik and j >= leik) else 0.1
+            xb[j_, 0, 0, 0] = j / 1000.0
+        y = mk.syota(xb)
+        if y is not None:
+            ulos.append(y)
+    y = mk.loppu()
+    if y is not None:
+        ulos.append(y)
+    tunn = [round(float(v) * 1000) for v in np.concatenate(ulos)[:, 0, 0, 0]]
+    assert tunn == list(range(100)) and mk.leikkauksia == (1 if leik else 0), (leik, tunn[:5], mk.leikkauksia)
+print("::notice title=torchtesti::monikuvaketju: järjestys ja kohtausten vaihdot OK")
+if shutil.which("ffmpeg"):
+    tv = Path(tempfile.mkdtemp(prefix="vsr_osa_"))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=96x64:r=25:d=2", "-c:v",
+                    "libx264", "-pix_fmt", "yuv420p", str(tv / "v.mp4")], check=True)
+    an_v = m.analysoi(tv / "v.mp4", tv)
+    geo_v = m.geometria(an_v, {})
+    yht = 0
+    for i, (alku_, maara_) in enumerate(((0, 20), (20, 20), (40, 1000))):
+        mk = vs.MonikuvaKetju(on, geo_v["rajaus"][3], geo_v["rajaus"][2], geo_v["oh"], geo_v["ow"],
+                              {"monikuva": _Vale(), "ai": 1.0, "rae": 0.0})
+        yht += m.aja_osa(tv / "v.mp4", an_v, geo_v, mk, on, tv / f"o{i}.mp4", alku_, maara_, "h264", tv / "lokit")
+    kaikki = int(float(an_v["kesto"]) * float(Fraction(an_v["R"])) + 0.5)
+    print(f"::notice title=torchtesti::monikuvaketju osissa: {yht}/{kaikki} kuvaa")
+    assert yht == kaikki, (yht, kaikki)
 print("TORCHTESTI OK")

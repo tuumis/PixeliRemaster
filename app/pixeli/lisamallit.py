@@ -60,8 +60,8 @@ LUETTELO = {
     },
     "monikuva": {
         "tiedosto": "realbasicvsr_ema.pth",
-        "koko": None,
-        "sha256": None,
+        "koko": 25286837,
+        "sha256": "0c7256093e7a05030c4c64c38ab074d0365046721281d33a869c1558ddc37e4e",
         "lahde": "https://download.openmmlab.com/mmediting/restorers/real_basicvsr/"
                  "realbasicvsr_c64b20_1x30x8_lr5e-5_150k_reds_20211104-52f77c2c.pth",
         "muunnos": "generator_ema",

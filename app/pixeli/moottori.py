@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.3.0"
+VERSIO = "1.4.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -57,7 +57,9 @@ ASETUKSET = {
     3: {"malli": "live", "ai": 0.85, "halo": 0.8, "halo_r": 2.5, "rae": 0.45},   # heikko lähde
     4: {"malli": "vhs", "ai": 1.0, "rae": 0.35},                                 # VHS / pehmeä
     5: {"malli": "ani", "ai": 1.0},                                              # piirretty
+    6: {"malli": "monikuva", "ai": 0.8, "rae": 0.35},                            # terävin (kokeellinen)
 }
+KUVA_ASETUKSET = (1, 2, 3, 4, 5)       # monikuvamalli vain videoille
 SAATO_AVAIMET = ("ai", "rae", "halo", "halo_r", "rae_koko", "kohina", "kasvot")
 SAATO_RAJAT = {"ai": (0.0, 1.0), "rae": (0.0, 1.5), "halo": (0.0, 1.5), "halo_r": (1.0, 4.0), "rae_koko": (0.3, 2.0),
                "kohina": (0.0, 1.5), "kasvot": (0.0, 1.0)}
@@ -464,11 +466,19 @@ def aja_osa(src, an, geo, ketju, ops, ulos, alku, maara, muoto, lokit, png=None,
     suodin.append(f"scale=in_color_matrix={mat}:in_range=tv:flags=accurate_rnd+full_chroma_int+bicubic,"
                   "format=rgb24")
     rate = f"{R.numerator}/{R.denominator}"
+    # monikuvamalli tarvitsee naapurikuvat myös osan reunoilla: puretaan muutama lisäkuva molemmin puolin
+    ajallinen = getattr(ketju, "ajallinen", False)
+    esi = jalki = 0
+    if ajallinen:
+        from .vsr import KONTEKSTI
+        esi, jalki = min(KONTEKSTI, alku), KONTEKSTI
+        ketju.nollaa()
+        ketju.alku = alku - esi
     dek = [ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin"]
-    if alku > 0:
-        dek += ["-ss", f"{float(alku / R):.6f}"]
+    if alku - esi > 0:
+        dek += ["-ss", f"{float((alku - esi) / R):.6f}"]
     dek += ["-i", src, "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", ",".join(suodin),
-            "-fps_mode", "cfr", "-r", rate, "-frames:v", str(maara),
+            "-fps_mode", "cfr", "-r", rate, "-frames:v", str(maara + esi + jalki),
             "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     enk = [ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
            "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-video_size", f"{ow}x{oh}", "-framerate", rate,
@@ -528,11 +538,40 @@ def aja_osa(src, an, geo, ketju, ops, ulos, alku, maara, muoto, lokit, png=None,
     n = 0
     normaali = False
     torch = getattr(ops, "torch", None)
+    tila = {"tuotettu": 0, "viime_pk": 0.0}
+
+    def valmiit(rgb):
+        """Valmiit kuvat koodaimelle (monikuvamallilla kontekstikuvat jätetään pois)."""
+        nonlocal n
+        if rgb is None:
+            return
+        m_ = rgb.shape[0]
+        a0, a1 = max(0, esi - tila["tuotettu"]), min(m_, esi + maara - tila["tuotettu"])
+        tila["tuotettu"] += m_
+        if a1 <= a0:
+            return
+        if (a0, a1) != (0, m_):
+            rgb = rgb[a0:a1]
+        if png:
+            for i in range(rgb.shape[0]):
+                if n + i in png:
+                    a = np.clip(ops.numpy(rgb[i:i + 1])[0].transpose(1, 2, 0) * 255 + 0.5, 0, 255)
+                    tallenna_png(png[n + i], a.astype(np.uint8))
+        if pikkukuva and time.time() - tila["viime_pk"] > 4:
+            tila["viime_pk"] = time.time()
+            try:
+                pikkukuva(ops.numpy(rgb[:1])[0])
+            except Exception:  # noqa: BLE001
+                pass
+        q_out.put(ops.pakkaa(*ketju.yuv420p10(rgb)))
+        n += rgb.shape[0]
+        if edistys:
+            edistys(n)
+
     try:
         konteksti = torch.inference_mode() if torch else _Tyhja()
         with konteksti:
             valmis = False
-            viime_pk = 0.0
             while not valmis and not virheet:
                 if peruuta is not None and peruuta.is_set():
                     raise Peruutettu()
@@ -546,22 +585,9 @@ def aja_osa(src, an, geo, ketju, ops, ulos, alku, maara, muoto, lokit, png=None,
                 if not kuvat:
                     break
                 xb = ops.from_uint8(np.stack(kuvat))
-                rgb = ketju.rgb_lopullinen(xb, alku + n)
-                if png:
-                    for i in range(len(kuvat)):
-                        if n + i in png:
-                            a = np.clip(ops.numpy(rgb[i:i + 1])[0].transpose(1, 2, 0) * 255 + 0.5, 0, 255)
-                            tallenna_png(png[n + i], a.astype(np.uint8))
-                if pikkukuva and time.time() - viime_pk > 4:
-                    viime_pk = time.time()
-                    try:
-                        pikkukuva(ops.numpy(rgb[:1])[0])
-                    except Exception:  # noqa: BLE001
-                        pass
-                q_out.put(ops.pakkaa(*ketju.yuv420p10(rgb)))
-                n += len(kuvat)
-                if edistys:
-                    edistys(n)
+                valmiit(ketju.syota(xb) if ajallinen else ketju.rgb_lopullinen(xb, alku + n))
+            if ajallinen and not virheet:
+                valmiit(ketju.loppu())
         normaali = True
     finally:
         q_out.put(None)
@@ -635,6 +661,8 @@ def itsetesti(edistys=None):
     try:
         with torch.inference_mode():
             for n, cfg in ASETUKSET.items():
+                if cfg.get("malli") == "monikuva":
+                    continue                       # tarkistetaan erikseen alla
                 a = {k: v for k, v in cfg.items() if k not in ("nimi", "kuvaus", "rae")}
                 if a.get("malli"):
                     nimi = a["malli"]
@@ -687,6 +715,25 @@ def itsetesti(edistys=None):
                     tulos["virheet"].append(f"Kohinanpoisto: tulokset eroavat ({e32})")
                 if not (e16 < 6e-3 and bool(np.isfinite(d16).all())):
                     tulos["fp32_mallit"].append("kohina")
+            # monikuvamalli (RealBasicVSR), jos ladattu: lyhyt kuvasarja
+            vp = lisamallit.polku("monikuva")
+            if vp:
+                from . import vsr
+                sd = kuva.lataa_pth(vp)
+                xs = [np.roll(testikuva(64, 96), (k, 2 * k), (2, 3)) for k in range(3)]
+                vn = vsr.RealBasicVSR(on, sd)(xs)
+                v32 = vsr.RealBasicVSR(ot32, sd)([ot32.tensor(v) for v in xs])
+                m16 = vsr.RealBasicVSR(ot16, sd)
+                m16.puolita()
+                v16 = m16([ot16.tensor(v) for v in xs])
+                e32 = max(float(np.abs(ot32.numpy(a_) - b_).max()) for a_, b_ in zip(v32, vn))
+                e16 = float(np.mean([np.abs(ot16.numpy(a_) - b_).mean() for a_, b_ in zip(v16, vn)]))
+                tulos["monikuva"] = {"ero_fp32": e32, "ero_fp16_keskim": e16}
+                if e32 > 5e-3:
+                    tulos["ok"] = False
+                    tulos["virheet"].append(f"Monikuvamalli: tulokset eroavat ({e32})")
+                if not (e16 < 6e-3 and all(bool(np.isfinite(ot16.numpy(v)).all()) for v in v16)):
+                    tulos["fp32_mallit"].append("monikuva")
             # rae: tilastollinen tarkistus
             a = {"rae": 1.0}
             kr = kuva.Ketju(ot32, h, w, 288, 384, a)
@@ -704,6 +751,8 @@ def itsetesti(edistys=None):
     L = Laite()
     xb = L.ops.tensor(np.repeat(testikuva(576, 720), 2, axis=0))
     for n in ASETUKSET:
+        if ASETUKSET[n].get("malli") == "monikuva":
+            continue
         k = kuva.Ketju(L.ops, 576, 720, 1440, 1920, L.asetus(n))
         with torch.inference_mode():
             for _ in range(2):
@@ -730,6 +779,30 @@ def itsetesti(edistys=None):
                 D(xb, 8.0)
             torch.cuda.synchronize()
         tulos["nopeus"]["kohina"] = round(8 / (time.time() - t), 1)
+    if lisamallit.polku("monikuva"):
+        n6 = next(n for n, a in ASETUKSET.items() if a.get("malli") == "monikuva")
+        from .vsr import IKKUNA, KONTEKSTI
+        k = L.ketju({"rajaus": [0, 0, 720, 576], "ow": 1920, "oh": 1440}, n6, None, {})
+        x1 = L.ops.tensor(testikuva(576, 720))
+        with torch.inference_mode():
+            k.syota(L.ops.cat_n([x1] * 4))              # lämmittely
+            k.loppu()
+            k.nollaa()
+            torch.cuda.synchronize()
+            t = time.time()
+            maara = IKKUNA + 2 * KONTEKSTI
+            for j in range(maara):
+                y = k.syota(x1)
+                if y is not None:
+                    L.ops.pakkaa(*k.yuv420p10(y))
+            y = k.loppu()
+            if y is not None:
+                L.ops.pakkaa(*k.yuv420p10(y))
+            torch.cuda.synchronize()
+        # mittauksessa laskettiin maara + KONTEKSTI kuvaa; pitkässä videossa IKKUNA + 2*KONTEKSTI per IKKUNA
+        suhde = (maara + KONTEKSTI) / maara / ((IKKUNA + 2 * KONTEKSTI) / IKKUNA)
+        tulos["nopeus"][str(n6)] = round(maara / (time.time() - t) * suhde, 2)
+        del k
     L.vapauta()
     tulos["valmis"] = True
     kirjoita_json(DATA / "itsetesti.json", tulos)
@@ -844,6 +917,8 @@ class Laite:
             if k in SAATO_AVAIMET and v is not None:
                 lo, hi = SAATO_RAJAT[k]
                 a[k] = min(hi, max(lo, float(v)))
+        if a.get("malli") == "monikuva":
+            a["monikuva"], a["malli"] = self.monikuvamalli(), None
         a["malli"] = self.malli(a["malli"]) if a.get("malli") else None
         if float(a.get("kohina", 0) or 0) > 0:
             a["kohinamalli"] = self.kohinamalli()
@@ -866,6 +941,17 @@ class Laite:
         T, G = self.kasvomallit()
         with self.inferenssi():
             return kasvot.palauta(self.ops, T, G, np.ascontiguousarray(lahde_u8), tulos_u8, float(voimakkuus))
+
+    def monikuvamalli(self):
+        """RealBasicVSR "Terävin"-asetukseen; ladataan ensimmäisellä käytöllä (noin 20 Mt)."""
+        if "monikuva" not in self._mallit:
+            from . import vsr, lisamallit
+            net = vsr.RealBasicVSR(self.ops, kuva.lataa_pth(lisamallit.varmista("monikuva")))
+            t = lue_json(DATA / "itsetesti.json", {}) or {}
+            if "monikuva" not in t.get("fp32_mallit", []):
+                net.puolita()
+            self._mallit["monikuva"] = net
+        return self._mallit["monikuva"]
 
     def korjausmallit(self):
         """(naarmuntunnistin, LaMa) vanhojen kuvien korjaukseen; ladataan ensimmäisellä käytöllä. fp32."""
@@ -913,8 +999,13 @@ class Laite:
         return self._mallit["kohina"]
 
     def ketju(self, geo, n, saato, an):
+        a = self.asetus(n, saato)
+        if a.get("monikuva") is not None:
+            from . import vsr
+            return vsr.MonikuvaKetju(self.ops, geo["rajaus"][3], geo["rajaus"][2], geo["oh"], geo["ow"],
+                                     a, an.get("matriisi", "bt601"))
         return kuva.Ketju(self.ops, geo["rajaus"][3], geo["rajaus"][2], geo["oh"], geo["ow"],
-                          self.asetus(n, saato), an.get("matriisi", "bt601"))
+                          a, an.get("matriisi", "bt601"))
 
     def inferenssi(self):
         return self.torch.inference_mode() if self.torch else _Tyhja()
@@ -947,28 +1038,54 @@ KOE_KOHDAT = (0.22, 0.5, 0.78)
 
 
 def lahdekuvat(src, an, geo, kd):
-    """Purkaa kolme lähdekuvaa (lomituksen purun ja rajauksen jälkeen) esikatselua varten."""
+    """Purkaa kolme lähdekuvaa (lomituksen purun ja rajauksen jälkeen) esikatselua varten. Jokaisen
+    ympäriltä tallennetaan myös lyhyt kuvasarja monikuvamallia varten (jakso_i.npy)."""
+    from .vsr import KONTEKSTI
     x, y, cw, ch = geo["rajaus"]
+    R = Fraction(an["R"])
+    koko = cw * ch * 3
     kuvat = []
     for i, f in enumerate(KOE_KOHDAT, 1):
         p = kd / f"lahde_{i}.npy"
         if not p.exists():
-            data = b""
+            data, k = b"", 0
             # säiliön kesto voi olla videota pidempi (esim. tekstitykset), joten yritetään aiemmin
             for t in (an["kesto"] * f, an["kesto"] * f * 0.5, 0.0):
+                t = max(0.0, t)
+                alku = max(0.0, t - KONTEKSTI / float(R))
                 r = subprocess.run([ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
-                                    "-ss", f"{max(0.0, t):.3f}", "-i", str(src), "-map", "0:v:0",
-                                    "-an", "-sn", "-dn", "-vf", kuvasuodin(an, geo), "-frames:v", "1",
+                                    "-ss", f"{alku:.3f}", "-i", str(src), "-map", "0:v:0",
+                                    "-an", "-sn", "-dn", "-vf", kuvasuodin(an, geo), "-fps_mode", "cfr",
+                                    "-r", f"{R.numerator}/{R.denominator}", "-frames:v", str(2 * KONTEKSTI + 1),
                                     "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True,
                                    creationflags=PIILOTA)
                 data = r.stdout
-                if len(data) >= cw * ch * 3:
+                n_ = len(data) // koko
+                if n_ >= 1:
+                    k = min(n_ - 1, int(round((t - alku) * float(R))))
                     break
-            if len(data) < cw * ch * 3:
+            if len(data) < koko:
                 raise RuntimeError("purku_epaonnistui")
-            np.save(p, np.frombuffer(data[:cw * ch * 3], np.uint8).reshape(1, ch, cw, 3))
+            jakso = np.frombuffer(data[:(len(data) // koko) * koko], np.uint8).reshape(-1, ch, cw, 3)
+            np.save(kd / f"jakso_{i}.npy", jakso)
+            kirjoita_json(kd / f"jakso_{i}.json", {"k": k})
+            np.save(p, jakso[k:k + 1])
         kuvat.append(np.load(p))
     return kuvat
+
+
+def lahdejakso(kd, i):
+    """Esikatselukohdan i kuvasarja ja lähdekuvan paikka siinä."""
+    j = np.load(kd / f"jakso_{i}.npy")
+    return j, int((lue_json(kd / f"jakso_{i}.json", {}) or {}).get("k", 0))
+
+
+def esikatselukuva(L, ketju, kd, i, kuva_u8, siemen):
+    """Yksi esikatselukuva; monikuvamalli saa lisäksi naapurikuvat."""
+    if getattr(ketju, "ajallinen", False):
+        jakso, k = lahdejakso(kd, i)
+        return ketju.kehys([L.ops.from_uint8(jakso[j:j + 1]) for j in range(len(jakso))], k, siemen), len(jakso)
+    return ketju.rgb_lopullinen(L.ops.from_uint8(kuva_u8), siemen), 1
 
 
 def koe_tunniste(geo):
@@ -1010,10 +1127,11 @@ def koekuvat(src, an, geo, wd, L, edistys=None, peruuta=None):
                     if peruuta is not None and peruuta.is_set():
                         raise Peruutettu()
                     t = time.time()
-                    rgb = ketju.rgb_lopullinen(L.ops.from_uint8(k), 1000 * i)
+                    rgb, maara = esikatselukuva(L, ketju, kd, i, k, 1000 * i)
                     out = L.ops.pakkaa(*ketju.yuv420p10(rgb))   # mukaan nopeusmittaukseen
                     del out
-                    ajat.append(time.time() - t)
+                    # monikuvamalli: sarja lasketaan kerralla; käsittelyssä ikkunan reunoilla on kontekstia
+                    ajat.append((time.time() - t) / maara * (1.0 if maara == 1 else 1.35))
                     rgb_png(kd / f"v{n}_k{i}.png", L.ops.numpy(rgb)[0])
                     tehty += 1
                     if edistys:
@@ -1039,7 +1157,7 @@ def saatokuva(src, an, geo, wd, L, n, saato, k):
     if not (kd / nimi).exists():
         with L.lukko, L.inferenssi():
             ketju = L.ketju(geo, n, saato, an)
-            rgb = ketju.rgb_lopullinen(L.ops.from_uint8(kuvat[k - 1]), 1000 * k)
+            rgb, _ = esikatselukuva(L, ketju, kd, k, kuvat[k - 1], 1000 * k)
             rgb_png(kd / nimi, L.ops.numpy(rgb)[0])
     return f"koe_{tun}/{nimi}"
 

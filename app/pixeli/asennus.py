@@ -155,12 +155,13 @@ class Ymparisto:
                 self.tila["torch"] = "ok"
             if not self.tila["testitila"]:
                 self._asenna_lisakirjastot()
-                # kohinanpoistomalli (130 Mt) kuuluu perusasennukseen
+                # kohinanpoistomalli (130 Mt) ja monikuvamalli (noin 20 Mt) kuuluvat perusasennukseen
                 from . import lisamallit
-                if not lisamallit.polku("kohina"):
-                    self._aseta(vaihe="mallit", edistys=0.0, tieto=None)
-                    lisamallit.varmista("kohina", edistys=lambda a, b: self._aseta(
-                        edistys=a / b if b else None, tieto={"tehty": a, "koko": b}))
+                for nimi in ("kohina", "monikuva"):
+                    if not lisamallit.polku(nimi):
+                        self._aseta(vaihe="mallit", edistys=0.0, tieto=None)
+                        lisamallit.varmista(nimi, edistys=lambda a, b: self._aseta(
+                            edistys=a / b if b else None, tieto={"tehty": a, "koko": b}))
             self._aseta(vaihe="itsetesti", edistys=0.0)
             if self.tila["testitila"]:
                 tulos = {"versio": m.VERSIO, "ok": True, "virheet": [], "nopeus": {}, "naytonohjain": "testi"}

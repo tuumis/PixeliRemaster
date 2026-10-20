@@ -446,7 +446,7 @@ function navigaattoriHtml(x) {
 function paneeliHtml(x, n, muokattava) {
   const nk = nakyma(x.id);
   const suositus = x.analyysi.suositus;
-  const esivalinnat = [1, 2, 3, 4, 5].map(i => {
+  const esivalinnat = (onKuva(x) ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6]).map(i => {
     const aika = arvioAika(x, i);
     return `<label class="esivalinta ${i === n ? "valittu" : ""}" title="${esc(asetusKuvaus(x, i))}">
       <input type="radio" name="asetus" value="${i}" ${i === n ? "checked" : ""} ${muokattava ? "" : "disabled"}>

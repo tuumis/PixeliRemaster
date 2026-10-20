@@ -115,6 +115,8 @@ fi: {
   "asetus.4.k": "Hyvin heikot ja haamuiset lähteet. Pehmeä mutta siisti. Selvästi hitaampi.",
   "asetus.5": "Piirretty",
   "asetus.5.k": "Animaatio: puhtaat ääriviivat, pakkaushäiriöt pois.",
+  "asetus.6": "Terävin – kokeellinen",
+  "asetus.6.k": "Monikuvamalli (RealBasicVSR) hakee tarkkuutta naapurikuvista: taustat ja tekstuurit tarkentuvat selvästi. Nopeasti liikkuvissa kasvoissa voi näkyä repeämiä – tarkista esikatselu. Hyvin hidas.",
   "asetus.suositus": "suositus",
   "asetus.aika": "noin {aika}",
 
@@ -379,6 +381,8 @@ en: {
   "asetus.4.k": "Very poor and ghosting sources. Soft but clean. Much slower.",
   "asetus.5": "Animation",
   "asetus.5.k": "Cartoons: clean outlines, compression artifacts removed.",
+  "asetus.6": "Sharpest – experimental",
+  "asetus.6.k": "A multi-frame model (RealBasicVSR) gathers detail from neighboring frames: backgrounds and textures get clearly sharper. Fast-moving faces may show tearing – check the preview. Very slow.",
   "asetus.suositus": "recommended",
   "asetus.aika": "about {aika}",
 
