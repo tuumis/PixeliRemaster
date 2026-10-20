@@ -200,4 +200,115 @@ oma_g = ot.numpy(G(ot.tensor(xg)))
 eg = float(np.abs(oma_g - viite_g).max())
 print(f"::notice title=torchtesti::GFPGAN v1.4 torch: suurin ero {eg:.2e} (alkuperäinen)")
 assert eg < 2e-3, eg
+
+# 7) naarmujen tunnistus vastaa Bringing Old Photos Back to Life -projektin UNetia
+from pixeli import korjaus as kj  # noqa: E402
+bop = Path(tempfile.mkdtemp(prefix="bopbtl_"))
+subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/microsoft/Bringing-Old-Photos-Back-to-Life",
+                str(bop)], check=True)
+dm = types.ModuleType("detection_models")
+dm.__path__ = [str(bop / "Global" / "detection_models")]
+sys.modules["detection_models"] = dm
+sb = types.ModuleType("detection_models.sync_batchnorm")
+sb.DataParallelWithCallback = lambda m_, *a, **k: m_
+sys.modules["detection_models.sync_batchnorm"] = sb
+from detection_models.networks import UNet  # noqa: E402
+np_ = lisamallit.varmista("naarmut")
+unet = UNet(in_channels=1, out_channels=1, depth=4, conv_num=2, wf=6, padding=True, batch_norm=True,
+            up_mode="upsample", with_tanh=False, sync_bn=False, antialiasing=True)
+unet.load_state_dict(torch.load(np_, map_location="cpu"), strict=True)
+unet.eval()
+yk = m.testikuva(64, 96)[:, :1]
+viite_n = torch.sigmoid(unet((torch.from_numpy(yk) - 0.5) / 0.5)).numpy()
+sd_n = kuva.lataa_pth(np_)
+for nimi_, ops_ in (("torch", ot), ("numpy", on)):
+    oma = ops_.numpy(kj.Naarmuntunnistin(ops_, sd_n)(ops_.tensor(yk)))
+    e = float(np.abs(oma - viite_n).max())
+    print(f"::notice title=torchtesti::naarmuntunnistin {nimi_}: suurin ero {e:.2e} (alkuperäinen)")
+    assert e < 1e-4, e
+
+# 8) täyttö vastaa alkuperäistä Big LaMa -generaattoria (ffc.py, riippuvuudet korvattu tyngillä)
+lama = Path(tempfile.mkdtemp(prefix="lama_"))
+subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/advimman/lama", str(lama)], check=True)
+koodi = (lama / "saicinpainting" / "training" / "modules" / "ffc.py").read_text(encoding="utf-8")
+tynga = """
+import torch.nn as nn
+def get_activation(kind='tanh'):
+    return {'tanh': nn.Tanh(), 'sigmoid': nn.Sigmoid(), False: nn.Identity()}[kind]
+class BaseDiscriminator(nn.Module):
+    pass
+class LearnableSpatialTransformWrapper(nn.Module):
+    pass
+class SELayer(nn.Module):
+    pass
+def get_shape(t):
+    return t.shape
+"""
+koodi = "\n".join(r for r in koodi.splitlines() if not r.startswith("from saicinpainting"))
+ffc = types.ModuleType("lama_ffc")
+exec(compile(tynga + koodi, "ffc.py", "exec"), ffc.__dict__)
+gen = ffc.FFCResNetGenerator(4, 3, ngf=64, n_downsampling=3, n_blocks=18, add_out_act="sigmoid",
+                             init_conv_kwargs={"ratio_gin": 0, "ratio_gout": 0, "enable_lfu": False},
+                             downsample_conv_kwargs={"ratio_gin": 0, "ratio_gout": 0, "enable_lfu": False},
+                             resnet_conv_kwargs={"ratio_gin": 0.75, "ratio_gout": 0.75, "enable_lfu": False})
+lp = lisamallit.varmista("taytto")
+gen.load_state_dict(torch.load(lp, map_location="cpu"), strict=True)
+gen.eval()
+xl = m.testikuva(64, 80)
+mk = np.zeros((1, 1, 64, 80), np.float32)
+mk[:, :, 20:30, 10:70] = 1.0
+viite_l = gen(torch.cat([torch.from_numpy(xl * (1 - mk)), torch.from_numpy(mk)], 1)).numpy()
+sd_l = kuva.lataa_pth(lp)
+for nimi_, ops_ in (("torch", ot), ("numpy", on)):
+    oma = ops_.numpy(kj.LaMa(ops_, sd_l)(ops_.tensor(xl), ops_.tensor(mk)))
+    e = float(np.abs(oma - viite_l).max())
+    print(f"::notice title=torchtesti::LaMa {nimi_}: suurin ero {e:.2e} (alkuperäinen)")
+    assert e < 1e-3, e
+# paloittainen täyttö: saumat eivät näy ja maskin ulkopuoli säilyy
+kj.PALA, kj.LIMITYS = 48, 16
+iso = (np.clip(m.testikuva(100, 140)[0].transpose(1, 2, 0), 0, 1) * 255).astype(np.uint8)
+mi = np.zeros((100, 140), bool)
+mi[40:44, 5:135] = True
+tay = kj.tayta(ot, kj.LaMa(ot, sd_l), iso, mi)
+assert (tay[~mi] == iso[~mi]).all()
+print(f"::notice title=torchtesti::LaMa paloittain: {int(mi.sum())} pikseliä täytetty")
+
+# 9) väritys vastaa alkuperäistä DDColoria; Lab-muunnos vastaa OpenCV:tä
+import cv2  # noqa: E402
+from pixeli import vari as vr  # noqa: E402
+rgb_t = np.random.default_rng(5).random((40, 50, 3)).astype(np.float32)
+e_lab = float(np.abs(vr.rgb_lab(rgb_t) - cv2.cvtColor(rgb_t, cv2.COLOR_RGB2Lab)).max())
+lab_t = cv2.cvtColor(rgb_t, cv2.COLOR_RGB2Lab)
+e_rgb = float(np.abs(np.clip(vr.lab_rgb(lab_t), 0, 1) - np.clip(cv2.cvtColor(lab_t, cv2.COLOR_Lab2RGB), 0, 1)).max())
+print(f"::notice title=torchtesti::Lab vs OpenCV: {e_lab:.2e} / {e_rgb:.2e}")
+assert e_lab < 0.05 and e_rgb < 2e-3, (e_lab, e_rgb)
+ddc = Path(tempfile.mkdtemp(prefix="ddcolor_"))
+subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/piddnad/DDColor", str(ddc)], check=True)
+for mod, polku_ in (("basicsr", ddc / "basicsr"), ("basicsr.archs", ddc / "basicsr" / "archs")):
+    mm = sys.modules.get(mod) or types.ModuleType(mod)
+    mm.__path__ = [str(polku_)]
+    sys.modules[mod] = mm
+import importlib.util  # noqa: E402
+spec = importlib.util.spec_from_file_location("ddcolor_malli", ddc / "ddcolor" / "model.py")
+ddm = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ddm)
+vp = lisamallit.varmista("vari")
+dd = ddm.DDColor(encoder_name="convnext-l", decoder_name="MultiScaleColorDecoder", input_size=[256, 256],
+                 num_output_channels=2, last_norm="Spectral", do_normalize=False, num_queries=100, num_scales=3,
+                 dec_layers=9)
+sd_v = torch.load(vp, map_location="cpu")
+puuttuu = dd.load_state_dict({k: v.float() for k, v in sd_v.items()}, strict=False)
+assert not puuttuu.missing_keys, puuttuu.missing_keys[:5]
+dd.eval()
+xv = np.repeat(m.testikuva(256, 256)[:, :1], 3, axis=1)
+viite_v = dd(torch.from_numpy(xv)).numpy()
+sd_vn = kuva.lataa_pth(vp)
+oma_v = ot.numpy(vr.DDColor(ot, sd_vn)(ot.tensor(xv)))
+e = float(np.abs(oma_v - viite_v).max())
+print(f"::notice title=torchtesti::DDColor torch: suurin ero {e:.2e} ab-yksikköä (alkuperäinen, |ab| < {float(np.abs(viite_v).max()):.0f})")
+assert e < 0.05, e
+xv_p = np.repeat(m.testikuva(64, 64)[:, :1], 3, axis=1)
+e2 = float(np.abs(vr.DDColor(on, sd_vn)(xv_p) - ot.numpy(vr.DDColor(ot, sd_vn)(ot.tensor(xv_p)))).max())
+print(f"::notice title=torchtesti::DDColor numpy vs torch: {e2:.2e}")
+assert e2 < 0.05, e2
 print("TORCHTESTI OK")

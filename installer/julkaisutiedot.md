@@ -1,3 +1,6 @@
+**Uutta 1.3.0:** vanhojen valokuvien korjaus: naarmujen, taitteiden ja pölyn poisto sekä mustavalkoisten ja seepiakuvien väritys tekoälyllä (kirkkaus ja yksityiskohdat säilyvät alkuperäisinä). Ohjelma huomaa mustavalkoisen kuvan ja ehdottaa väritystä.
+**New in 1.3.0:** old photo restoration: removing scratches, creases and dust, and colorizing black-and-white and sepia photos with AI (brightness and detail stay as in the original). The program notices black-and-white photos and suggests colorizing them.
+
 **Uutta 1.2.0:** kohinanpoisto ja pakkausjälkien siivous, lähteen laatuun sovitetut oletussäädöt (luonnollinen, ei muovinen tulos), kuvien kasvojen palautus (valinnainen), iPhonen HEIC-kuvat, kokonaisen kansion lisäys ja asetukset kerralla kaikille, kuvien kierto, 1×-parannus ja tallennusmuoto, videoiden ääni- ja tekstitysraitojen valinta sekä pienemmän tiedoston vaihtoehto.
 **New in 1.2.0:** noise and compression artifact removal, default settings tuned to each source's quality (natural, not plastic), optional face restoration for photos, iPhone HEIC photos, adding whole folders and applying settings to all, image rotation, 1× enhancement and output format, choosing video audio and subtitle tracks, and a smaller-file option.
 

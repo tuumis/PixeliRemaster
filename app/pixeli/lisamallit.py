@@ -42,8 +42,8 @@ LUETTELO = {
     },
     "naarmut": {
         "tiedosto": "bopbtl_naarmut.pth",
-        "koko": None,
-        "sha256": None,
+        "koko": 150642101,
+        "sha256": "fd629d570294aa47bc3c0924728dab2c95b35a2289b9da334ccaf277c079bba3",
         "lahde": "https://github.com/microsoft/Bringing-Old-Photos-Back-to-Life/releases/download/v1.0/global_checkpoints.zip",
         "jasen": "detection/FT_Epoch_latest.pt",
         "muunnos": "model_state",
@@ -51,8 +51,8 @@ LUETTELO = {
     },
     "taytto": {
         "tiedosto": "big_lama.pth",
-        "koko": None,
-        "sha256": None,
+        "koko": 204537128,
+        "sha256": "a7138ca2369b400825a63c025b9c3c176160206c3a80422ef15fa32941eca83c",
         "lahde": "https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip",
         "jasen": "models/best.ckpt",
         "muunnos": "generaattori",
@@ -60,8 +60,8 @@ LUETTELO = {
     },
     "vari": {
         "tiedosto": "ddcolor_modelscope_fp16.pth",
-        "koko": None,
-        "sha256": None,
+        "koko": 456060711,
+        "sha256": "f10e36eef5aeaf1ae843e3e24db65b164b5ecca0dd14c602c7efa4d85bef1eb3",
         "lahde": "https://huggingface.co/piddnad/DDColor-models/resolve/main/ddcolor_modelscope.pth",
         "muunnos": "fp16",
         "kuvaus": "DDColor (Kang ym., DAMO Academy), Apache 2.0",

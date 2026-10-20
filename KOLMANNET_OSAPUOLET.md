@@ -12,10 +12,18 @@
 
 | GFPGANv1.4.pth (kasvojen palautus / face restoration) | Tencent ARC (GFPGAN) | Apache 2.0 (arkkitehtuuri: GFPGANv1Clean, ilman NVIDIA-lisenssin CUDA-osia / without the NVIDIA-licensed CUDA ops) | https://github.com/TencentARC/GFPGAN – ladataan ensimmäisellä käytöllä / downloaded on first use |
 | detection_Resnet50_Final.pth (kasvojen tunnistus / face detection) | Xintao Wang (facexlib), RetinaFace | MIT | https://github.com/xinntao/facexlib – ladataan ensimmäisellä käytöllä / downloaded on first use |
+| bopbtl_naarmut.pth (naarmujen tunnistus / scratch detection) | Microsoft (Bringing Old Photos Back to Life) | MIT | https://github.com/microsoft/Bringing-Old-Photos-Back-to-Life – ladataan ensimmäisellä käytöllä / downloaded on first use |
+| big_lama.pth (täyttö / inpainting) | Samsung AI Center (LaMa, Suvorov ym.) | Apache 2.0 | https://github.com/advimman/lama – ladataan ensimmäisellä käytöllä / downloaded on first use |
+| ddcolor_modelscope_fp16.pth (väritys / colorization) | DAMO Academy (DDColor, Kang ym.) | Apache 2.0 | https://github.com/piddnad/DDColor – ladataan ensimmäisellä käytöllä / downloaded on first use |
 
-Malleja ei ole muokattu. / The models are unmodified.
+Malleja ei ole koulutettu uudelleen. Kolmesta viimeisestä on julkaisuun poimittu pelkät verkon painot
+(tarkistuspisteen optimoijan tila ja opetuksen apuverkot poistettu; DDColor puolitarkkuudella).
+/ The models have not been retrained. For the last three, only the network weights were extracted
+(optimizer state and training-only networks removed; DDColor in half precision).
 
 Mallien arkkitehtuurit (SPAN, RealPLKSR) on toteutettu uudelleen tiedostossa `app/pixeli/kuva.py` alkuperäisten julkaisujen ja spandrel-kirjaston (MIT) perusteella, ja toteutus on tarkistettu mallien ONNX-vientejä vastaan.
+
+Muut arkkitehtuurit (DRUNet, RetinaFace, GFPGAN, naarmujen tunnistuksen UNet, LaMa ja DDColor) on toteutettu uudelleen tiedostoissa `app/pixeli/kuva.py`, `kasvot.py`, `korjaus.py` ja `vari.py`; jokainen rakennus vertaa tuloksia alkuperäisiin toteutuksiin (`installer/torchtesti.py`). / The other architectures were reimplemented and every build compares them against the original implementations.
 
 ## Algoritmit / Algorithms
 

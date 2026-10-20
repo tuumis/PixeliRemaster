@@ -32,6 +32,8 @@ Esikatselun yhteydessä ohjelma mittaa lähteen kohinan, pakkausjäljet ja terä
 
 JPEG-, PNG-, HEIC- (iPhone), WebP-, BMP- ja TIFF-kuvat käsitellään samalla tekoälyllä kuin videot. Valitse koko: **1×** (vain parannus), **2×**, **4×** (tekoäly ajetaan kahdesti) tai **Näytön kokoon**. Kuvan voi kääntää ja tallennusmuodon valita. Isoista kuvista esikatselu näyttää kolme kohtaa täydessä koossa.
 
+**Vanhat valokuvat:** naarmujen, taitteiden ja pölyn poisto (tunnistus + täyttö tekoälyllä), mustavalkoisen tai seepiakuvan väritys (kirkkaus ja yksityiskohdat säilyvät alkuperäisinä) ja kasvojen palautus. Mallit ladataan ensimmäisellä käytöllä.
+
 - JPEG-kuvasta tulee `Nimi [Remaster].jpg`, muista `Nimi [Remaster].png`.
 - Puhelinkuvien suunta korjataan, ja EXIF-tiedot (esim. kuvausaika ja kamera) sekä väriprofiili säilyvät. PNG-kuvien läpinäkyvyys säilyy.
 - Kuvat käsitellään videon rinnalla, joten ne eivät jää odottamaan pitkää elokuvaa.
@@ -89,7 +91,7 @@ PixeliRemaster improves DVD movies, TV recordings, old video files and images wi
 
 **Requirements:** Windows 10/11 64-bit, an NVIDIA GeForce/RTX graphics card with a current driver, about 8 GB free disk space (about 3 GB of AI components are downloaded on first launch). The installer is not code-signed, so Windows may show a SmartScreen warning: choose **More info → Run anyway**.
 
-**Usage:** drag videos or images into the window, compare presets in the preview (drag the divider or press **space**), then choose **Process**. Video processing can be paused and resumed. The result `Name [Remaster].mkv` is saved next to the original with all audio tracks, subtitles and chapters.
+**Usage:** drag videos or images into the window, compare presets in the preview (drag the divider or press **space**), then choose **Process**. Video processing can be paused and resumed. The result `Name [Remaster].mkv` is saved next to the original with all audio tracks, subtitles and chapters. For old photos, the program can remove scratches and dust, colorize black-and-white photos and restore faces (models are downloaded on first use).
 
 **Images:** JPEG, PNG, WebP, BMP and TIFF, enlarged 2×, 4× (the AI runs twice) or to fit the screen. JPEGs are saved as `Name [Remaster].jpg`, others as `.png`. Photo orientation is corrected, EXIF data and color profiles are kept, and PNG transparency is preserved. Images are processed alongside videos, up to 64 megapixels.
 
