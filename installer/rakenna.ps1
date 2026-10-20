@@ -36,8 +36,17 @@ Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile (Join-Path $bu
 & $py (Join-Path $build "get-pip.py") --no-warn-script-location
 if ($LASTEXITCODE -ne 0) { throw "get-pip epäonnistui" }
 Remove-Item (Join-Path $build "get-pip.py")
-& $py -m pip install --no-warn-script-location --disable-pip-version-check "numpy==2.2.6" "pywebview==5.4"
-if ($LASTEXITCODE -ne 0) { throw "pip install epäonnistui" }
+function Pip([string[]]$paketit, [string[]]$lisa = @()) {
+  $tuloste = & $py -m pip install --no-warn-script-location --disable-pip-version-check @lisa @paketit 2>&1
+  $tuloste | Write-Host
+  if ($LASTEXITCODE -ne 0) {
+    throw ("pip install " + ($paketit -join " ") + ": " + (($tuloste | Select-Object -Last 6) -join " | "))
+  }
+}
+# Upotettu Python ohittaa PYTHONPATHin (._pth), joten pipin eristetty rakennus ei toimi:
+# lähdekoodipaketit (esim. proxy_tools) rakennetaan ilman eristystä.
+Pip @("setuptools", "wheel")
+Pip @("numpy==2.2.6", "pywebview==5.4") @("--no-build-isolation")
 $tuonti = & $py -c "import numpy, webview; print('numpy', numpy.__version__)" 2>&1
 Vaihe "Kirjastot: $tuonti"
 if ($LASTEXITCODE -ne 0) { throw "kirjastojen tuonti epäonnistui" }
