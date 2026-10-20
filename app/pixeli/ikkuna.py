@@ -14,7 +14,7 @@ from pathlib import Path
 from . import moottori as m
 
 _VIDEO = "*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv"
-_KUVA = "*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.tif;*.tiff"
+_KUVA = "*.jpg;*.jpeg;*.png;*.heic;*.heif;*.webp;*.bmp;*.tif;*.tiff"
 SUODATTIMET = {
     "fi": (f"Videot ja kuvat ({_VIDEO};{_KUVA})", f"Videot ({_VIDEO})", f"Kuvat ({_KUVA})", "Kaikki tiedostot (*.*)"),
     "en": (f"Videos and images ({_VIDEO};{_KUVA})", f"Videos ({_VIDEO})", f"Images ({_KUVA})", "All files (*.*)"),

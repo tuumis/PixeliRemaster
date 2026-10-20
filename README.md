@@ -22,11 +22,15 @@ Asennusohjelmaa ei ole allekirjoitettu maksullisella varmenteella, joten Windows
 3. Vertaa asetuksia esikatselussa: vedä jakajaa tai paina **välilyöntiä** vaihtaaksesi alkuperäisen ja paranneltun välillä. **Katso liikkeessä** tekee lyhyen videopätkän.
 4. Valitse **Käsittele**. Käsittelyn voi keskeyttää ja jatkaa myöhemmin samasta kohdasta.
 
-Valmis tiedosto `Nimi [Remaster].mkv` tallentuu alkuperäisen viereen. Mukana ovat kaikki ääniraidat, tekstitykset ja kappaleet sekä videon vieressä oleva `.srt`-tekstitys.
+Valmis tiedosto `Nimi [Remaster].mkv` tallentuu alkuperäisen viereen. Mukana ovat kaikki ääniraidat, tekstitykset ja kappaleet sekä videon vieressä oleva `.srt`-tekstitys; halutessasi voit valita raidat ja pienemmän tiedostokoon.
+
+### Suositellut säädöt
+
+Esikatselun yhteydessä ohjelma mittaa lähteen kohinan, pakkausjäljet ja terävyyden ja sovittaa jokaisen asetuksen hienosäädöt niihin: pakkausjälkiä siivotaan maltillisesti (kohinanpoisto, DRUNet), hyvin pehmeissä lähteissä tekoälyn osuutta pienennetään ja filmiraetta lisätään sen verran, ettei pinta muutu muoviseksi. Säätöjä voi muuttaa, ja **Käytä näitä asetuksia myös muihin** kopioi ne kaikkiin listan tiedostoihin.
 
 ### Kuvat
 
-JPEG-, PNG-, WebP-, BMP- ja TIFF-kuvat käsitellään samalla tekoälyllä kuin videot. Valitse koko: **2×**, **4×** (tekoäly ajetaan kahdesti) tai **Näytön kokoon**. Isoista kuvista esikatselu näyttää kolme kohtaa täydessä koossa.
+JPEG-, PNG-, HEIC- (iPhone), WebP-, BMP- ja TIFF-kuvat käsitellään samalla tekoälyllä kuin videot. Valitse koko: **1×** (vain parannus), **2×**, **4×** (tekoäly ajetaan kahdesti) tai **Näytön kokoon**. Kuvan voi kääntää ja tallennusmuodon valita. Isoista kuvista esikatselu näyttää kolme kohtaa täydessä koossa.
 
 - JPEG-kuvasta tulee `Nimi [Remaster].jpg`, muista `Nimi [Remaster].png`.
 - Puhelinkuvien suunta korjataan, ja EXIF-tiedot (esim. kuvausaika ja kamera) sekä väriprofiili säilyvät. PNG-kuvien läpinäkyvyys säilyy.

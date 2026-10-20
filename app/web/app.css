@@ -95,6 +95,8 @@ button,input,select{font:inherit;color:inherit}
 .jono-otsikko{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 10px}
 .jono-lista{list-style:none;margin:0;padding:0 8px;overflow:auto;flex:1}
 .jono-ala{padding:12px 16px 16px;border-top:1px solid var(--viiva)}
+.lisaa-rivi{display:grid;grid-template-columns:1fr auto;gap:8px}
+.kaikkiin{width:100%;margin:2px 0 12px}
 .vihje{margin:8px 0 0;color:var(--hiljainen);font-size:13px;text-align:center}
 
 .kohta{display:grid;grid-template-columns:64px 1fr;gap:10px;padding:8px;border-radius:var(--r-pieni);cursor:pointer;
@@ -188,12 +190,25 @@ button,input,select{font:inherit;color:inherit}
 .esivalinta.valittu .n{color:#BDF1F1}
 .merkki-suositus{font-size:11.5px;color:var(--syaani);margin-left:6px;font-weight:500}
 .saato{margin:8px 0 0}
+.sovitettu{margin:-4px 0 2px;line-height:1.35}
 .saato label{display:flex;justify-content:space-between;font-size:13.5px}
 .saato output{color:var(--himmea)}
 .saato input[type=range]{width:100%;accent-color:var(--syaani);margin:4px 0 0}
 .valinta-rivi{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;font-size:13.5px}
 .valinta-rivi label{font-weight:600}
 .valinta-rivi select{background:var(--nosto);border:1px solid var(--viiva);border-radius:var(--r-pieni);padding:5px 8px;width:100%}
+.valinnat{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 10px}
+.valinnat .valinta-rivi{display:contents}
+.kierto-rivi{display:flex;align-items:center;gap:6px}
+.raidat summary{cursor:pointer;display:flex;justify-content:space-between;align-items:baseline;gap:10px;list-style:none}
+.raidat summary::-webkit-details-marker{display:none}
+.raidat summary::before{content:"▸";color:var(--hiljainen);margin-right:6px}
+.raidat[open] summary::before{content:"▾"}
+.raidat-otsikko{font-weight:600;flex:1}
+.raita-ryhma{font-size:12.5px;color:var(--hiljainen);margin:10px 0 2px}
+.raidat .valinta{font-size:13px;padding:3px 0;align-items:flex-start}
+.raidat .valinta input{margin-top:2px;flex:none}
+.kierto-rivi .painike{padding:3px 10px;font-size:15px}
 
 /* kuvan yleiskuva ja esikatselualueet */
 .navi{padding:12px 0}

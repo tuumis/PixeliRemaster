@@ -81,7 +81,12 @@ g = kv.geometria_kuva({"leveys": 4032, "korkeus": 3024}, {"skaala": "4"}, (2560,
 assert g["skaala"] == "2" and (g["ow"], g["oh"]) == (8064, 6048) and not g["vaihtoehdot"]["4"]["ok"], g
 g = kv.geometria_kuva({"leveys": 640, "korkeus": 480}, {"skaala": "naytto"}, (2560, 1440))
 assert (g["ow"], g["oh"], g["kierrokset"]) == (1920, 1440, 2), g
-print("kuvat OK")
+from pixeli import mittaus, lisamallit  # noqa: E402
+mm = mittaus.mittaa([(m.testikuva(120, 160)[0].transpose(1, 2, 0) * 255).astype(np.uint8)])
+ol = mittaus.oletukset(mm)
+assert set(ol) == {"2", "3", "4", "5"} and all(0 <= v["kohina"] <= 0.2 for v in ol.values()), (mm, ol)
+assert set(lisamallit.LUETTELO) and all(t["sha256"] and t["koko"] for t in lisamallit.LUETTELO.values())
+print("kuvat OK, mittaus", mm)
 
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)

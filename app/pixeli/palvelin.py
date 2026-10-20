@@ -55,7 +55,7 @@ class Sovellus:
             for n, a in m.ASETUKSET.items():
                 a = dict(a, **(kuvat.KUVA_MUUTOKSET if kuva else {}))
                 tulos[str(n)] = {"ai": a.get("ai", 1.0) if a.get("malli") else None, "rae": a.get("rae", 0.0),
-                                 "halo": a.get("halo", 0.0), "malli": a.get("malli")}
+                                 "halo": a.get("halo", 0.0), "kohina": a.get("kohina", 0.0), "malli": a.get("malli")}
             return tulos
         return {"versio": m.VERSIO, "ymparisto": self.ymp.nayta(), "jono": self.jono.tila(),
                 "esiasetukset": esi(False), "esiasetukset_kuva": esi(True),
@@ -76,12 +76,16 @@ class Sovellus:
             return {}
         if polku == "lisaa":
             return j.lisaa(d.get("polut") or [])
+        if polku == "valinta_kaikkiin":
+            return {"n": j.valinta_kaikkiin(d["id"])}
         if polku == "valitse":
-            kansio = d.get("laji") == "kansio"
+            kansio = d.get("laji") in ("kansio", "lisaa_kansio")
             if self.ikkuna and hasattr(self.ikkuna, "valitse"):
                 polut = self.ikkuna.valitse(kansio)
             else:
                 polut = asennus.tiedostovalinta_powershell(kansio)
+            if d.get("laji") == "lisaa_kansio":
+                return j.lisaa(polut[:1]) if polut else {"lisatyt": [], "ohitetut": []}
             if kansio:
                 return {"kansio": polut[0] if polut else None}
             return j.lisaa(polut) if polut else {"lisatyt": [], "ohitetut": []}
@@ -95,7 +99,8 @@ class Sovellus:
             j.siirra(d["id"], int(d.get("suunta", 1)))
             return {}
         if polku == "valinta":
-            j.aseta_valinta(d["id"], {k: d[k] for k in ("asetus", "saato", "dar", "skaala") if k in d})
+            j.aseta_valinta(d["id"], {k: d[k] for k in ("asetus", "saato", "dar", "skaala", "kierto", "muoto", "laatu",
+                                                        "aanet", "tekstit", "ulkoiset") if k in d})
             return {}
         if polku == "esikatsele":
             j.esikatsele(d["id"])

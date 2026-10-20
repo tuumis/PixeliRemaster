@@ -65,6 +65,8 @@ class Ymparisto:
         if paivitys:
             m.loki("Uusi versio: ajetaan itsetesti")
             self.aloita_asennus()
+        elif self.valmis() and not self.tila["testitila"] and not self._lisakirjastot_ok():
+            threading.Thread(target=self._asenna_lisakirjastot, daemon=True).start()
 
     @staticmethod
     def _nvidia():
@@ -151,6 +153,14 @@ class Ymparisto:
                     raise RuntimeError("torch_asennus")
             with self.lukko:
                 self.tila["torch"] = "ok"
+            if not self.tila["testitila"]:
+                self._asenna_lisakirjastot()
+                # kohinanpoistomalli (130 Mt) kuuluu perusasennukseen
+                from . import lisamallit
+                if not lisamallit.polku("kohina"):
+                    self._aseta(vaihe="mallit", edistys=0.0, tieto=None)
+                    lisamallit.varmista("kohina", edistys=lambda a, b: self._aseta(
+                        edistys=a / b if b else None, tieto={"tehty": a, "koko": b}))
             self._aseta(vaihe="itsetesti", edistys=0.0)
             if self.tila["testitila"]:
                 tulos = {"versio": m.VERSIO, "ok": True, "virheet": [], "nopeus": {}, "naytonohjain": "testi"}
@@ -169,7 +179,8 @@ class Ymparisto:
             self._aseta(kaynnissa=False, vaihe="valmis", edistys=1.0)
         except Exception as e:  # noqa: BLE001
             m.loki(f"Asennus epäonnistui: {traceback.format_exc()}")
-            avain = str(e) if str(e) in ("ei_cudaa", "torch_asennus", "itsetesti", "ffmpeg_lataus") else "yleinen"
+            avain = str(e) if str(e) in ("ei_cudaa", "torch_asennus", "itsetesti", "ffmpeg_lataus",
+                                         "mallin_lataus") else "yleinen"
             self._aseta(kaynnissa=False, virhe=avain, tieto=str(e)[-400:])
 
     def _lataa_ffmpeg(self):
@@ -199,6 +210,28 @@ class Ymparisto:
                 z.unlink()
             except OSError:
                 pass
+
+    @staticmethod
+    def _lisakirjastot_ok():
+        try:
+            importlib.invalidate_caches()
+            import pillow_heif  # noqa: F401
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _asenna_lisakirjastot(self):
+        """iPhone-kuvien (HEIC) tuki: pillow-heif ladataan PyPI:stä samaan tapaan kuin PyTorch
+        (ei jaeta asennusohjelmassa, koska mukana tulevilla koodekeilla on omat lisenssinsä).
+        Epäonnistuminen ei estä muuta käyttöä."""
+        if self._lisakirjastot_ok():
+            return
+        self._aseta(vaihe="torch_asennus", edistys=None)
+        cmd = [_python_exe(), "-m", "pip", "install", "pillow-heif", "--no-warn-script-location",
+               "--disable-pip-version-check"]
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           creationflags=_PIILOTA)
+        m.loki("pip pillow-heif: " + (p.stdout + p.stderr)[-1500:])
 
     def _asenna_torch(self):
         """pip --progress-bar raw tulostaa 'Progress X of Y' -rivejä, joista saadaan edistyminen."""
@@ -263,7 +296,7 @@ def tiedostovalinta_powershell(kansio=False):
         skripti = ("Add-Type -AssemblyName System.Windows.Forms;"
                    "$d=New-Object System.Windows.Forms.OpenFileDialog;$d.Multiselect=$true;"
                    "$d.Filter='Video / Kuva|*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv;"
-                   "*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.tif;*.tiff|*|*.*';"
+                   "*.jpg;*.jpeg;*.png;*.heic;*.heif;*.webp;*.bmp;*.tif;*.tiff|*|*.*';"
                    "if($d.ShowDialog() -eq 'OK'){[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
                    "$d.FileNames -join \"`n\"}")
     r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", skripti], capture_output=True,

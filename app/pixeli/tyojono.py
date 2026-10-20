@@ -130,7 +130,8 @@ class Jono:
         geo = m.geometria(an, t.get("valinta") or {}, self.kohde())
         t["geo"] = geo
         n = int((t.get("valinta") or {}).get("asetus") or an["suositus"])
-        t["arvio_nopeus"] = m.arvioi_nopeus(an, geo, n)
+        saato = (t.get("valinta") or {}).get("saato") or ((t.get("koe") or {}).get("oletukset") or {}).get(str(n)) or {}
+        t["arvio_nopeus"] = m.arvioi_nopeus(an, geo, n, float(saato.get("kohina", 0) or 0) > 0)
 
     def _laite(self, nimi):
         if nimi not in self._laitteet:
@@ -143,8 +144,10 @@ class Jono:
         tiedostot = []
         for p in polut:
             p = Path(str(p).strip().strip('"'))
-            if p.is_dir():
-                tiedostot += sorted(f for f in p.iterdir() if f.is_file() and f.suffix.lower() in TUETUT)
+            if p.is_dir():   # kansio alikansioineen (esim. sarjan kaudet)
+                tiedostot += sorted((f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in TUETUT
+                                     and "[Remaster]" not in f.name and "[AI-skaalattu]" not in f.name),
+                                    key=lambda f: [f.parent.as_posix().lower(), f.name.lower()])
             elif p.is_file():
                 tiedostot.append(p)
         with self.lukko:
@@ -207,13 +210,52 @@ class Jono:
                 v["dar"] = valinta["dar"] if valinta["dar"] in ("4:3", "16:9") else None
             if "skaala" in valinta:
                 v["skaala"] = valinta["skaala"] if valinta["skaala"] in kuvat.SKAALAT else None
+            if "kierto" in valinta:
+                v["kierto"] = int(valinta["kierto"]) % 360 if int(valinta["kierto"] or 0) % 360 in kuvat.KIERROT else None
+                v["kierto"] = v["kierto"] or None
+            if "muoto" in valinta:
+                v["muoto"] = valinta["muoto"] if valinta["muoto"] in ("jpg", "png") else None
+            if "laatu" in valinta:
+                v["laatu"] = "pieni" if valinta["laatu"] == "pieni" else None
+            for k in ("aanet", "tekstit"):        # None = kaikki raidat
+                if k in valinta:
+                    v[k] = sorted({int(i) for i in valinta[k]}) if valinta[k] is not None else None
+            if "ulkoiset" in valinta:
+                v["ulkoiset"] = False if valinta["ulkoiset"] is False else None
             t["valinta"] = {k: x for k, x in v.items() if x is not None}
             if t.get("analyysi"):
                 vanha = (t.get("koe") or {}).get("tunniste")
                 self._paivita_geometria(t)
-                if ("dar" in valinta or "skaala" in valinta) and vanha != self._koe_tunniste(t):
+                if ("dar" in valinta or "skaala" in valinta or "kierto" in valinta) and vanha != self._koe_tunniste(t):
                     t["koe"] = {"tila": "ei"}
         self._tallenna()
+
+    def valinta_kaikkiin(self, tid):
+        """Kopioi tiedoston asetuksen (ja käyttäjän säädöt) kaikkiin saman lajin käsittelemättömiin.
+        Säätämättömät tiedostot saavat edelleen omaan laatuunsa sovitetut oletukset."""
+        with self.lukko:
+            lahde = self._tyo(tid)
+            v = dict(lahde.get("valinta") or {})
+            if not v.get("asetus") and lahde.get("analyysi"):
+                v["asetus"] = lahde["analyysi"]["suositus"]
+            kopio = {k: v.get(k) for k in ("asetus", "saato", "skaala", "muoto", "laatu")}
+            n = 0
+            for t in self.tyot:
+                if t is lahde or t.get("laji") != lahde.get("laji") or t["tila"] not in ("odottaa", "keskeytetty", "virhe"):
+                    continue
+                if t["tila"] == "keskeytetty" and t.get("aloitettu"):
+                    continue          # osittain käsiteltyä ei muuteta (osat on tehty vanhoilla asetuksilla)
+                uusi = dict(t.get("valinta") or {})
+                uusi.update({k: x for k, x in kopio.items() if k not in ("skaala", "muoto") or t.get("laji") == "kuva"})
+                vanha_skaala = (t.get("valinta") or {}).get("skaala")
+                t["valinta"] = {k: x for k, x in uusi.items() if x is not None}
+                if t.get("analyysi"):
+                    self._paivita_geometria(t)
+                    if t.get("laji") == "kuva" and vanha_skaala != t["valinta"].get("skaala"):
+                        t["koe"] = {"tila": "ei"}
+                n += 1
+        self._tallenna()
+        return n
 
     def aloita(self, tid=None):
         with self.lukko:
@@ -306,7 +348,7 @@ class Jono:
                     d["analyysi"] = {k: an.get(k) for k in (
                         "leveys", "korkeus", "koodekki", "kesto", "fps", "R", "lomitus", "desimointi",
                         "tyyppi", "suositus", "tekstityksia", "huomiot", "rajaus", "dar_levy",
-                        "laji", "muoto", "laatu", "alfa")}
+                        "laji", "muoto", "laatu", "alfa", "aaniraidat", "tekstiraidat")}
                 d.setdefault("laji", "video")
                 tyot.append(d)
             jonossa = [t for t in self.tyot if t["tila"] in ("jonossa", "kasitellaan")]
@@ -347,10 +389,12 @@ class Jono:
                 if not polku.exists():
                     raise RuntimeError("tiedostoa_ei_loydy")
                 an = kuvat.analysoi_kuva(polku, wd) if laji == "kuva" else m.analysoi(polku, wd)
+                ulkoiset = [] if laji == "kuva" else [p.name for p in m.ulkoiset_tekstitykset(polku)]
                 with self.lukko:
                     t = self._tyo(tid)
                     t["laji"] = laji
                     t["analyysi"] = an
+                    t["ulkoiset_tekstit"] = ulkoiset
                     self._paivita_geometria(t)
                     if t["tila"] == "analysoidaan":
                         t["tila"] = "hd" if an["tyyppi"] == "hd" else "odottaa"
@@ -366,7 +410,7 @@ class Jono:
                         t = self._tyo(tid)
                         t["tila"] = "virhe"
                         t["virhe"] = {"avain": str(e) if str(e) in ("ffmpeg_puuttuu", "tiedostoa_ei_loydy",
-                                                                     "liian_suuri")
+                                                                     "liian_suuri", "heic_puuttuu")
                                       else "analyysi", "tieto": str(e)[-300:]}
                     except KeyError:
                         pass
@@ -502,7 +546,7 @@ class Jono:
             self._kasiteltava_kuva = tid
             polku, an, geo, valinta = Path(t["polku"]), t["analyysi"], t["geo"], dict(t.get("valinta") or {})
             wd = self._wd(t)
-            ulos = m.ulostulo_polku(polku, self.asetukset.get("ulos_kansio"), kuvat.ulostulo_paate(an))
+            ulos = m.ulostulo_polku(polku, self.asetukset.get("ulos_kansio"), kuvat.ulostulo_paate(an, valinta))
         self._tallenna()
 
         def edistys(e, t=t):
@@ -584,12 +628,16 @@ class Jono:
                     with self.lukko:
                         if t.get("koe") is kohde:
                             t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"], "aika": tiedot["aika"],
-                                        "alueet": tiedot["alueet"]}
+                                        "alueet": tiedot["alueet"], "mittaus": tiedot.get("mittaus"),
+                                        "kuvaus": tiedot.get("kuvaus"), "oletukset": tiedot.get("oletukset")}
                 elif laji == "koe":
                     tiedot = m.koekuvat(polku, an, geo, wd, L, edistys=ed)
                     with self.lukko:
                         t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"],
-                                    "nopeus": {str(k): v for k, v in tiedot["nopeus"].items()}}
+                                    "nopeus": {str(k): v for k, v in tiedot["nopeus"].items()},
+                                    "mittaus": tiedot.get("mittaus"), "kuvaus": tiedot.get("kuvaus"),
+                                    "oletukset": tiedot.get("oletukset")}
+                        self._paivita_geometria(t)
                 else:
                     asetus, saato = param
                     url = m.liikepatka(polku, an, geo, wd, L, int(asetus), saato or None, edistys=ed)

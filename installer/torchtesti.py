@@ -105,6 +105,48 @@ if m.ffmpeg_ok():
             assert im.mode == "RGBA" and im.size == (160, 120)
             al = np.asarray(im)[..., 3]
             assert al[:, :70].mean() > 240 and al[:, 90:].mean() < 15
+    # iPhone-kuva (HEIC): suunta, EXIF ja tallennus JPEG:ksi
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    ex = Image.Exif()
+    ex[0x010F] = "iPhone"
+    src3 = d / "IMG_0001.HEIC"
+    Image.fromarray(a).save(src3, format="HEIF", quality=90, exif=ex.tobytes())
+    wd = m.tyokansio(src3)
+    an = kv.analysoi_kuva(src3, wd)
+    geo = kv.geometria_kuva(an, {"skaala": "2"})
+    ulos = m.ulostulo_polku(src3, d / "ulos", kv.ulostulo_paate(an))
+    r = kv.kasittele_kuva(src3, an, geo, {"asetus": 2}, wd, L, ulos)
+    im = Image.open(r["ulos"])
+    print(f"::notice title=torchtesti::HEIC {an['leveys']}x{an['korkeus']} -> {im.format} {im.size}, EXIF {im.getexif().get(0x010F)}")
+    assert im.format == "JPEG" and im.size == (160, 120) and im.getexif().get(0x010F) == "iPhone"
 else:
     print("::warning title=torchtesti::ffmpeg ei käytettävissä, kuvien käsittelytesti ohitetaan")
+
+# 5) kohinanpoisto (DRUNet) vastaa alkuperäistä KAIR-toteutusta
+import subprocess  # noqa: E402
+from pixeli import lisamallit  # noqa: E402
+kair = Path(tempfile.mkdtemp(prefix="kair_"))
+subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/cszn/KAIR", str(kair)], check=True)
+sys.path.insert(0, str(kair))
+from models.network_unet import UNetRes  # noqa: E402
+mp = lisamallit.varmista("kohina")
+verkko = UNetRes(in_nc=4, out_nc=3, nc=[64, 128, 256, 512], nb=4, act_mode="R",
+                 downsample_mode="strideconv", upsample_mode="convtranspose")
+verkko.load_state_dict(torch.load(mp, map_location="cpu"), strict=True)
+verkko.eval()
+sd = kuva.lataa_pth(mp)
+for (hh, ww) in ((48, 64), (37, 50)):
+    xk = m.testikuva(hh, ww)
+    with torch.inference_mode():
+        xt = torch.from_numpy(xk)
+        ph, pw = (8 - hh % 8) % 8, (8 - ww % 8) % 8
+        xp = torch.nn.functional.pad(xt, (0, pw, 0, ph), mode="replicate")
+        kartta = torch.full((1, 1, hh + ph, ww + pw), 10.0 / 255.0)
+        viite = verkko(torch.cat([xp, kartta], 1))[:, :, :hh, :ww].numpy()
+        oma_t = ot.numpy(kuva.Kohinanpoisto(ot, sd)(ot.tensor(xk), 10.0))
+    oma_n = kuva.Kohinanpoisto(on, sd)(xk, 10.0)
+    e1, e2 = float(np.abs(oma_t - viite).max()), float(np.abs(oma_n - viite).max())
+    print(f"::notice title=torchtesti::DRUNet {hh}x{ww}: torch {e1:.2e}, numpy {e2:.2e} (KAIR)")
+    assert e1 < 1e-4 and e2 < 1e-4, (e1, e2)
 print("TORCHTESTI OK")

@@ -8,6 +8,8 @@
 | 2xVHS2HD-RealPLKSR.pth | asterixcool (Starinspace) | CC BY-SA 4.0 | https://openmodeldb.info/models/2x-VHS2HD |
 | 2x_AniSD_AC_G6i2b_SPAN_190K.pth | Sirosky | CC BY-NC 4.0 (ei kaupalliseen käyttöön / non-commercial) | https://github.com/Sirosky/Upscale-Hub |
 
+| drunet_color.pth (kohinanpoisto / denoising) | Kai Zhang ym. (KAIR) | MIT | https://github.com/cszn/KAIR – ladataan ensimmäisellä käynnistyksellä / downloaded on first launch |
+
 Malleja ei ole muokattu. / The models are unmodified.
 
 Mallien arkkitehtuurit (SPAN, RealPLKSR) on toteutettu uudelleen tiedostossa `app/pixeli/kuva.py` alkuperäisten julkaisujen ja spandrel-kirjaston (MIT) perusteella, ja toteutus on tarkistettu mallien ONNX-vientejä vastaan.
@@ -24,5 +26,6 @@ Mallien arkkitehtuurit (SPAN, RealPLKSR) on toteutettu uudelleen tiedostossa `ap
 | NumPy | BSD-3-Clause | mukana / bundled |
 | pywebview, pythonnet | BSD-3-Clause, MIT | mukana / bundled |
 | PyTorch | BSD-3-Clause | ladataan ensimmäisellä käynnistyksellä / downloaded on first launch |
+| pillow-heif, Pillow (HEIC-kuvat / iPhone photos) | BSD-3-Clause, MIT-CMU; mukana libheif ja libde265 (LGPL-3.0) | ladataan ensimmäisellä käynnistyksellä PyPI:stä / downloaded on first launch from PyPI |
 | FFmpeg (BtbN builds) | GPL | ladataan ensimmäisellä käynnistyksellä / downloaded on first launch; https://github.com/BtbN/FFmpeg-Builds |
 | Barlow-kirjasin / typeface | SIL Open Font License 1.1 | `app/web/fontit/OFL.txt` |

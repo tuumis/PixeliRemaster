@@ -23,13 +23,16 @@ import numpy as np
 from . import kuva
 from . import moottori as m
 
-KUVAPAATTEET = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+KUVAPAATTEET = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
+HEIC = {".heic", ".heif"}
 MAKS_LAHDE = 64_000_000         # pikseliä
 MAKS_ULOS = 64_000_000
 MAKS_SYOTE = 13_000_000         # mallin syöte yhdellä kierroksella (näytönohjaimen muisti)
 ESIKATSELU_KOKO = 6_000_000     # tätä pienempi tulos esikatsellaan kokonaan
 ESIKATSELU_ALUE = 3_000_000     # muuten kolme tämän kokoista aluetta (tuloksen pikseleinä)
-SKAALAT = ("2", "4", "naytto")
+SKAALAT = ("1", "2", "4", "naytto")
+MUODOT = ("auto", "jpg", "png")
+KIERROT = (0, 90, 180, 270)
 PALOITTAIN_KUVA = 300_000       # käsittelyssä paloitellaan jo tätä suuremmat (edistyminen ja keskeytys)
 
 # kuvissa ei oletuksena filmirakeita
@@ -155,6 +158,21 @@ def kirjoita_png(polku, rgb, alfa=None, icc=None):
     tmp.replace(polku)
 
 
+def jpeg_metatiedot(exif=None, icc=None):
+    """EXIF- ja ICC-tiedot JPEG-segmenteiksi (esim. HEIC-kuvasta)."""
+    seg = b""
+    if exif:
+        exif = exif if exif.startswith(b"Exif\x00\x00") else b"Exif\x00\x00" + exif
+        if len(exif) + 2 <= 0xFFFF:
+            seg += b"\xff\xe1" + struct.pack(">H", len(exif) + 2) + exif
+    if icc:
+        osat = [icc[i:i + 65519] for i in range(0, len(icc), 65519)][:255]
+        for i, osa in enumerate(osat, 1):
+            data = b"ICC_PROFILE\x00" + bytes([i, len(osat)]) + osa
+            seg += b"\xff\xe2" + struct.pack(">H", len(data) + 2) + data
+    return b"\xff\xd8" + seg + b"\xff\xda\x00\x02"     # kelvollinen otsake segmenttien lukemiseen
+
+
 def kirjoita_jpeg(polku, rgb, lahde_data=None):
     """JPEG ffmpegillä (laatu ~95, värit täydellä tarkkuudella 4:4:4). Alkuperäisen EXIF-tiedot
     (suunta nollataan, koska kuva on jo käännetty) ja väriprofiili kopioidaan mukaan."""
@@ -217,8 +235,30 @@ def _alfa_mahdollinen(pix):
     return pix == "pal8" or pix.startswith(("rgba", "bgra", "argb", "abgr", "ya", "yuva", "gbrap"))
 
 
+def avaa_heic(src):
+    """HEIC/HEIF (iPhone) pillow-heifillä. libheif soveltaa kuvan omat kierrot, joten suunta on jo oikein.
+    Palauttaa (rgb, alfa tai None, exif, icc)."""
+    try:
+        import pillow_heif
+        from PIL import Image
+    except ImportError as e:
+        raise RuntimeError("heic_puuttuu") from e
+    pillow_heif.register_heif_opener()
+    with Image.open(src) as im:
+        exif, icc = im.info.get("exif"), im.info.get("icc_profile")
+        im = im.convert("RGBA" if "A" in im.getbands() else "RGB")
+        a = np.asarray(im)
+    if a.shape[2] == 4:
+        al = np.ascontiguousarray(a[:, :, 3])
+        return np.ascontiguousarray(a[:, :, :3]), (al if int(al.min()) < 255 else None), exif, icc
+    return np.ascontiguousarray(a), None, exif, icc
+
+
 def pura(src, an):
     """Lähdekuva RGB-taulukoksi (h, w, 3) uint8 ja läpinäkyvyys (h, w) tai None, suunta korjattuna."""
+    if an.get("muoto") == "heic" or Path(src).suffix.lower() in HEIC:
+        rgb, alfa, _, _ = avaa_heic(src)
+        return rgb, alfa
     alfa = an.get("alfa_mahd")
     muoto = "rgba" if alfa else "rgb24"
     w0, h0 = an["leveys_raaka"], an["korkeus_raaka"]
@@ -271,12 +311,17 @@ def analysoi_kuva(src: Path, wd: Path):
     if vanha and vanha.get("avain") == avain and (wd / "pikku.png").exists() and (wd / "yleis.png").exists():
         return vanha
     m.loki(f"Analysoidaan kuva {src.name}")
-    p = m.aja([m.ffbin("ffprobe"), "-v", "error", "-print_format", "json", "-show_streams", src])
-    if p.returncode != 0:
-        raise RuntimeError(f"Tiedostoa ei voitu lukea: {p.stderr.strip()[-400:]}")
-    v = next((s for s in json.loads(p.stdout).get("streams", []) if s.get("codec_type") == "video"), None)
-    if not v or not v.get("width"):
-        raise RuntimeError("Tiedostossa ei ole kuvaa.")
+    if src.suffix.lower() in HEIC:
+        rgb0, _, _, _ = avaa_heic(src)
+        v = {"width": rgb0.shape[1], "height": rgb0.shape[0], "codec_name": "heic", "pix_fmt": "rgb24"}
+        del rgb0
+    else:
+        p = m.aja([m.ffbin("ffprobe"), "-v", "error", "-print_format", "json", "-show_streams", src])
+        if p.returncode != 0:
+            raise RuntimeError(f"Tiedostoa ei voitu lukea: {p.stderr.strip()[-400:]}")
+        v = next((s for s in json.loads(p.stdout).get("streams", []) if s.get("codec_type") == "video"), None)
+        if not v or not v.get("width"):
+            raise RuntimeError("Tiedostossa ei ole kuvaa.")
     w0, h0 = int(v["width"]), int(v["height"])
     if w0 * h0 > MAKS_LAHDE:
         raise RuntimeError("liian_suuri")
@@ -304,7 +349,7 @@ def analysoi_kuva(src: Path, wd: Path):
     askel = max(1, int(math.sqrt(w * h / 1_000_000)))
     otos = rgb[::askel, ::askel].reshape(-1, 3).astype(np.uint32)
     varit = int(np.unique((otos[:, 0] << 16) | (otos[:, 1] << 8) | otos[:, 2]).size)
-    haviollinen = koodekki in ("mjpeg", "webp")
+    haviollinen = koodekki in ("mjpeg", "webp", "heic")
     if not haviollinen and varit < min(20000, 0.15 * len(otos)):
         tyyppi, suositus = "piirros", 5
     elif (laatu is not None and laatu < 86) or max(w, h) <= 900:
@@ -326,10 +371,17 @@ def analysoi_kuva(src: Path, wd: Path):
 
 # ---------------------------------------------------------------- koko
 
+def kaanna(a, kierto):
+    """Käyttäjän valitsema kierto myötäpäivään (0, 90, 180, 270)."""
+    return a if not kierto else np.ascontiguousarray(np.rot90(a, k=-(int(kierto) // 90)))
+
+
 def geometria_kuva(an, valinta=None, kohde=(2560, 1440)):
-    """Lopputuloksen koko. Kuvasuhde säilyy aina (sama kerroin molempiin suuntiin)."""
+    """Lopputuloksen koko. Kuvasuhde säilyy aina (sama kerroin molempiin suuntiin).
+    1x parantaa kuvan suurentamatta (malli laskee 2x ja tulos pienennetään takaisin)."""
     valinta = valinta or {}
-    w, h = an["leveys"], an["korkeus"]
+    kierto = int(valinta.get("kierto") or 0) % 360
+    w, h = (an["korkeus"], an["leveys"]) if kierto in (90, 270) else (an["leveys"], an["korkeus"])
     vaihtoehdot = {}
     for v in SKAALAT:
         if v == "naytto":
@@ -347,7 +399,7 @@ def geometria_kuva(an, valinta=None, kohde=(2560, 1440)):
     va = vaihtoehdot[sk]
     return {"rajaus": [0, 0, w, h], "ow": va["ow"], "oh": va["oh"], "suhde": w / h, "suhde_nimi": None,
             "dar": f"{w}:{h}", "skaala": sk, "s": va["s"], "kierrokset": va["kierrokset"],
-            "vaihtoehdot": vaihtoehdot}
+            "vaihtoehdot": vaihtoehdot, "kierto": kierto}
 
 
 def asetus_kuva(L, n, saato, geo):
@@ -359,8 +411,8 @@ def asetus_kuva(L, n, saato, geo):
 # ---------------------------------------------------------------- esikatselu
 
 def koe_tunniste(geo):
-    return hashlib.sha1(json.dumps([geo["rajaus"], geo["ow"], geo["oh"], geo["kierrokset"], m.VERSIO,
-                                    "kuva", 2]).encode()).hexdigest()[:8]
+    return hashlib.sha1(json.dumps([geo["rajaus"], geo["ow"], geo["oh"], geo["kierrokset"], geo.get("kierto", 0),
+                                    m.VERSIO, "kuva", 3]).encode()).hexdigest()[:8]
 
 
 def esikatselualueet(rgb, geo):
@@ -402,15 +454,18 @@ def _alue_koko(alue, geo):
     return max(1, int(round(alue[3] * s))), max(1, int(round(alue[2] * s)))
 
 
-def _koko_kuva(src, an, kd):
-    """Purettu lähdekuva välimuistista (alueiden siirtoa varten)."""
+def _koko_kuva(src, an, kd, geo):
+    """Purettu (ja käyttäjän valitsemalla tavalla käännetty) lähdekuva välimuistista. Samalla
+    kirjoitetaan yleiskuva esikatselualueiden valintaan."""
     p, pa = kd / "koko.npy", kd / "koko_alfa.npy"
-    if p.exists():
+    if p.exists() and (kd / "yleis.png").exists():
         return np.load(p, mmap_mode="r"), (np.load(pa, mmap_mode="r") if pa.exists() else None)
     rgb, alfa = pura(src, an)
+    rgb, alfa = kaanna(rgb, geo.get("kierto", 0)), (kaanna(alfa, geo.get("kierto", 0)) if alfa is not None else None)
     np.save(p, rgb)
     if alfa is not None:
         np.save(pa, alfa)
+    _pikkukuva(kd / "yleis.png", rgb, alfa, (720, 540))
     return rgb, alfa
 
 
@@ -427,7 +482,7 @@ def lahdealueet(src, an, geo, kd):
     tiedot = m.lue_json(kd / "alueet.json")
     if tiedot and all((kd / f"lahde_{i}.npy").exists() for i in range(1, len(tiedot) + 1)):
         return tiedot, [np.load(kd / f"lahde_{i}.npy") for i in range(1, len(tiedot) + 1)]
-    rgb, alfa = _koko_kuva(src, an, kd)
+    rgb, alfa = _koko_kuva(src, an, kd, geo)
     alueet = esikatselualueet(np.asarray(rgb), geo)
     kuvat = [_tallenna_lahdealue(kd, i, rgb, alfa, a) for i, a in enumerate(alueet, 1)]
     m.kirjoita_json(kd / "alueet.json", alueet)
@@ -447,19 +502,37 @@ def _tallenna_esikatselu(polku, kd, i, rgb_u8, _valimuisti={}):
     m.tallenna_png(polku, rgb_u8)
 
 
+def mittaa_kuva(src, an, geo, wd):
+    """Kuvan laadun mittaus ja siihen sovitetut säädöt (välimuistissa)."""
+    from . import mittaus
+    kd = wd / f"koe_{koe_tunniste(geo)}"
+    kd.mkdir(parents=True, exist_ok=True)
+    vanha = m.lue_json(kd / "mittaus.json")
+    if vanha and vanha.get("v") == 1:
+        return vanha
+    rgb, _ = _koko_kuva(src, an, kd, geo)
+    mm = mittaus.mittaa([np.asarray(rgb)])
+    d = {"v": 1, "mittaus": mm, "kuvaus": mittaus.kuvaus(mm), "oletukset": mittaus.oletukset(mm, kuva=True)}
+    m.kirjoita_json(kd / "mittaus.json", d)
+    return d
+
+
 def koekuvat_kuva(src, an, geo, wd, L, edistys=None, peruuta=None):
-    """Vertailukuvat kaikilla asetuksilla ja käsittelyajan arvio."""
+    """Vertailukuvat kaikilla asetuksilla (kuvaan sovitetuilla säädöillä) ja käsittelyajan arvio."""
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
     kd.mkdir(parents=True, exist_ok=True)
     alueet, kuvat = lahdealueet(src, an, geo, kd)
+    mt = mittaa_kuva(src, an, geo, wd)
+    ol = mt["oletukset"]
     oh, ow = _alue_koko(alueet[0], geo)
     vaiheet = len(m.ASETUKSET) * len(kuvat)
     tehty = 0
     aika = {}
     for n in m.ASETUKSET:
         with L.lukko:
-            ketju = kuva.Ketju(L.ops, alueet[0][3], alueet[0][2], oh, ow, asetus_kuva(L, n, None, geo), yuv=False)
+            ketju = kuva.Ketju(L.ops, alueet[0][3], alueet[0][2], oh, ow, asetus_kuva(L, n, ol.get(str(n)), geo),
+                               yuv=False)
             ajat = []
             with L.inferenssi():
                 for i, k in enumerate(kuvat, 1):
@@ -477,9 +550,10 @@ def koekuvat_kuva(src, an, geo, wd, L, edistys=None, peruuta=None):
             L.tyhjenna()
         # arvio koko kuvalle: alueen laskenta-aika suhteutettuna pikselimäärään (+ tallennus)
         mitattu = min(ajat[1:]) if len(ajat) > 1 else ajat[0]
-        suhde = (an["leveys"] * an["korkeus"]) / max(1, alueet[0][2] * alueet[0][3])
+        suhde = (geo["rajaus"][2] * geo["rajaus"][3]) / max(1, alueet[0][2] * alueet[0][3])
         aika[str(n)] = round(mitattu * suhde * (1.1 if suhde > 1.5 else 1.0) + geo["ow"] * geo["oh"] / 12e6, 1)
-    tiedot = {"tunniste": tun, "aika": aika, "alueet": alueet, "aika_luotu": time.time()}
+    tiedot = {"tunniste": tun, "aika": aika, "alueet": alueet, "aika_luotu": time.time(), "mittaus": mt["mittaus"],
+              "kuvaus": mt["kuvaus"], "oletukset": ol}
     m.kirjoita_json(kd / "koe.json", tiedot)
     return tiedot
 
@@ -492,16 +566,17 @@ def siirra_alue(src, an, geo, wd, L, k, cx, cy, edistys=None):
     alueet, _ = lahdealueet(src, an, geo, kd)
     k = max(1, min(len(alueet), int(k)))
     _, _, aw, ah = alueet[k - 1]
-    w, h = an["leveys"], an["korkeus"]
+    w, h = geo["rajaus"][2], geo["rajaus"][3]
     x = int(max(0, min(w - aw, round(float(cx) - aw / 2)))) // 2 * 2
     y = int(max(0, min(h - ah, round(float(cy) - ah / 2)))) // 2 * 2
     alueet[k - 1] = [x, y, aw, ah]
-    rgb, alfa = _koko_kuva(src, an, kd)
+    rgb, alfa = _koko_kuva(src, an, kd, geo)
     osa = _tallenna_lahdealue(kd, k, rgb, alfa, alueet[k - 1])
     oh, ow = _alue_koko(alueet[k - 1], geo)
+    ol = mittaa_kuva(src, an, geo, wd)["oletukset"]
     for j, n in enumerate(m.ASETUKSET, 1):
         with L.lukko, L.inferenssi():
-            ketju = kuva.Ketju(L.ops, ah, aw, oh, ow, asetus_kuva(L, n, None, geo), yuv=False)
+            ketju = kuva.Ketju(L.ops, ah, aw, oh, ow, asetus_kuva(L, n, ol.get(str(n)), geo), yuv=False)
             rgb_o = ketju.rgb_lopullinen(L.ops.from_uint8(osa), 1000 * k)
             _tallenna_esikatselu(kd / f"v{n}_k{k}.png", kd, k, L.ops.uint8_hwc(rgb_o))
             del rgb_o, ketju
@@ -537,15 +612,23 @@ def saatokuva_kuva(src, an, geo, wd, L, n, saato, k):
 
 # ---------------------------------------------------------------- käsittely
 
-def ulostulo_paate(an):
-    return ".jpg" if an.get("muoto") == "jpeg" else ".png"
+def ulostulo_paate(an, valinta=None):
+    """Tallennusmuoto: käyttäjän valinta, muuten JPEG-kuvista (ja iPhonen HEIC-kuvista) JPEG, muista PNG."""
+    muoto = (valinta or {}).get("muoto") or "auto"
+    if muoto == "jpg":
+        return ".jpg"
+    if muoto == "png":
+        return ".png"
+    return ".jpg" if an.get("muoto") in ("jpeg", "heic") else ".png"
 
 
 def kasittele_kuva(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None):
     n = int(valinta.get("asetus") or an["suositus"])
-    saato = valinta.get("saato") or None
+    saato = valinta.get("saato") or mittaa_kuva(src, an, geo, wd)["oletukset"].get(str(n))
     t0 = time.time()
     rgb, alfa = pura(src, an)
+    rgb = kaanna(rgb, geo.get("kierto", 0))
+    alfa = kaanna(alfa, geo.get("kierto", 0)) if alfa is not None else None
     h, w, _ = rgb.shape
     oh, ow = geo["oh"], geo["ow"]
     tila = {"viim": 0.0}
@@ -594,7 +677,13 @@ def kasittele_kuva(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=Non
     ulos.parent.mkdir(parents=True, exist_ok=True)
     with open(src, "rb") as f:
         alku = f.read(4 << 20)
+    if Path(src).suffix.lower() in HEIC:            # HEIC: EXIF ja väriprofiili JPEG-segmenteiksi
+        _, _, exif, icc = avaa_heic(src)
+        alku = jpeg_metatiedot(exif, icc)
     if ulos.suffix.lower() == ".jpg":
+        if alfa_ulos is not None:          # JPEG ei tue läpinäkyvyyttä: valkoinen tausta
+            a = alfa_ulos.astype(np.float32)[..., None] / 255.0
+            tulos = (tulos.astype(np.float32) * a + 255.0 * (1 - a) + 0.5).astype(np.uint8)
         kirjoita_jpeg(ulos, tulos, alku)
     else:
         kirjoita_png(ulos, tulos, alfa_ulos, png_icc(alku))

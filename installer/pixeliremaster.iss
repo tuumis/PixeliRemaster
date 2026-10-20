@@ -65,7 +65,7 @@ Name: "{autodesktop}\PixeliRemaster"; Filename: "{app}\python\pythonw.exe"; Para
 
 [Registry]
 ; "Paranna PixeliRemasterilla" video- ja kuvatiedostojen hiiren oikean painikkeen valikkoon
-#dim Paatteet[18] {".mkv", ".mp4", ".avi", ".vob", ".mpg", ".mpeg", ".m2v", ".ts", ".m4v", ".mov", ".wmv", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+#dim Paatteet[20] {".mkv", ".mp4", ".avi", ".vob", ".mpg", ".mpeg", ".m2v", ".ts", ".m4v", ".mov", ".wmv", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".bmp", ".tif", ".tiff"}
 #define i 0
 #sub RekisteriRivit
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\{#Paatteet[i]}\shell\PixeliRemaster"; ValueType: string; ValueName: ""; ValueData: "{cm:Paranna}"; Flags: uninsdeletekey; Tasks: kontekstivalikko

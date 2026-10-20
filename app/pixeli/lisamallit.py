@@ -68,9 +68,11 @@ def varmista(nimi, edistys=None, peruuta=None):
         _lataukset[nimi] = {"tehty": 0, "koko": t["koko"], "virhe": None}
     m.loki(f"Ladataan malli {t['tiedosto']}")
     try:
-        for yritys in range(3):
+        # ensin ohjelman oma julkaisu, sitten alkuperäinen lähde (summa tarkistetaan kummastakin)
+        osoitteet = [JULKAISU + t["tiedosto"], t["lahde"]]
+        for yritys in range(4):
             try:
-                with urllib.request.urlopen(JULKAISU + t["tiedosto"], timeout=60) as r, open(tmp, "wb") as f:
+                with urllib.request.urlopen(osoitteet[yritys % 2], timeout=60) as r, open(tmp, "wb") as f:
                     tehty = 0
                     while True:
                         if peruuta is not None and peruuta.is_set():
@@ -86,10 +88,10 @@ def varmista(nimi, edistys=None, peruuta=None):
                             edistys(tehty, t["koko"])
                 break
             except (OSError, ValueError) as e:
-                m.loki(f"Mallin lataus epäonnistui ({yritys + 1}/3): {e}")
-                if yritys == 2:
+                m.loki(f"Mallin lataus epäonnistui ({osoitteet[yritys % 2]}): {e}")
+                if yritys == 3:
                     raise RuntimeError("mallin_lataus") from e
-                time.sleep(3)
+                time.sleep(2)
         if tmp.stat().st_size != t["koko"] or _sha256(tmp) != t["sha256"]:
             tmp.unlink(missing_ok=True)
             raise RuntimeError("mallin_lataus")

@@ -1,3 +1,6 @@
+**Uutta 1.2.0:** kohinanpoisto ja pakkausjälkien siivous, lähteen laatuun sovitetut oletussäädöt (luonnollinen, ei muovinen tulos), iPhonen HEIC-kuvat, kokonaisen kansion lisäys ja asetukset kerralla kaikille, kuvien kierto, 1×-parannus ja tallennusmuoto, videoiden ääni- ja tekstitysraitojen valinta sekä pienemmän tiedoston vaihtoehto.
+**New in 1.2.0:** noise and compression artifact removal, default settings tuned to each source's quality (natural, not plastic), iPhone HEIC photos, adding whole folders and applying settings to all, image rotation, 1× enhancement and output format, choosing video audio and subtitle tracks, and a smaller-file option.
+
 **Uutta 1.1.0:** kuvien parannus (JPEG, PNG, WebP, BMP, TIFF) samalla tekoälyllä kuin videot: 2×, 4× tai näytön kokoon, EXIF-tiedot, väriprofiili ja läpinäkyvyys säilyvät. Kuvat käsitellään videon rinnalla, joten ne eivät jää odottamaan pitkää elokuvaa. Uusi, selkeämpi kuvake.
 **New in 1.1.0:** image enhancement (JPEG, PNG, WebP, BMP, TIFF) with the same AI as videos: 2×, 4× or fit to screen, keeping EXIF data, color profile and transparency. Images are processed alongside videos, so they never wait for a long movie. New, clearer icon.
 

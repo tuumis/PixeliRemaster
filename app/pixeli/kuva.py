@@ -522,6 +522,27 @@ PALA = 512                  # palan koko lähteen pikseleinä
 PALOITTAIN_YLI = 1_000_000  # paloitellaan, kun kuvassa on enemmän pikseleitä
 
 
+def paloittain(ops, fn, syotteet, reuna, skaala, pala=PALA, palaute=None, osuus=(0.0, 1.0)):
+    """Laskee fn(*syotteet) paloissa (kaikilla syötteillä sama korkeus ja leveys). Palan ympärille
+    otetaan `reuna` pikseliä naapureita, ja tulos rajataan, joten saumoja ei synny."""
+    h, w = syotteet[0].shape[2], syotteet[0].shape[3]
+    palat = [(y0, x0) for y0 in range(0, h, pala) for x0 in range(0, w, pala)]
+    ulos = None
+    for i, (y0, x0) in enumerate(palat):
+        y1, x1 = min(h, y0 + pala), min(w, x0 + pala)
+        a0, b0 = max(0, y0 - reuna), max(0, x0 - reuna)
+        a1, b1 = min(h, y1 + reuna), min(w, x1 + reuna)
+        r = fn(*[s_[:, :, a0:a1, b0:b1] for s_ in syotteet])
+        if ulos is None:
+            ulos = ops.zeros((r.shape[0], r.shape[1], h * skaala, w * skaala), r)
+        s = skaala
+        ulos[:, :, y0 * s:y1 * s, x0 * s:x1 * s] = r[:, :, (y0 - a0) * s:(y1 - a0) * s, (x0 - b0) * s:(x1 - b0) * s]
+        del r
+        if palaute:
+            palaute(osuus[0] + (osuus[1] - osuus[0]) * (i + 1) / len(palat))
+    return ulos
+
+
 class Malli:
     """SPAN- tai RealPLKSR-malli tilasanakirjasta. Arkkitehtuuri tunnistetaan avaimista.
 
@@ -651,25 +672,7 @@ class Malli:
         return self._paloittain(self._plksr_loppu, [f, x], 2, self.skaala, ((n - 1) / n, 1.0))
 
     def _paloittain(self, fn, syotteet, reuna, skaala, osuus):
-        """Laskee fn(*syotteet) paloissa. Kaikilla syötteillä sama korkeus ja leveys."""
-        o = self.ops
-        h, w = syotteet[0].shape[2], syotteet[0].shape[3]
-        P = self.pala
-        palat = [(y0, x0) for y0 in range(0, h, P) for x0 in range(0, w, P)]
-        ulos = None
-        for i, (y0, x0) in enumerate(palat):
-            y1, x1 = min(h, y0 + P), min(w, x0 + P)
-            a0, b0 = max(0, y0 - reuna), max(0, x0 - reuna)
-            a1, b1 = min(h, y1 + reuna), min(w, x1 + reuna)
-            r = fn(*[s_[:, :, a0:a1, b0:b1] for s_ in syotteet])
-            if ulos is None:
-                ulos = o.zeros((r.shape[0], r.shape[1], h * skaala, w * skaala), r)
-            s = skaala
-            ulos[:, :, y0 * s:y1 * s, x0 * s:x1 * s] = r[:, :, (y0 - a0) * s:(y1 - a0) * s, (x0 - b0) * s:(x1 - b0) * s]
-            del r
-            if self.palaute:
-                self.palaute(osuus[0] + (osuus[1] - osuus[0]) * (i + 1) / len(palat))
-        return ulos
+        return paloittain(self.ops, fn, syotteet, reuna, skaala, self.pala, self.palaute, osuus)
 
     def __call__(self, x, raja=None):
         """raja: paloitellaan, kun pikseleitä on enemmän (oletus self.raja)."""
@@ -714,8 +717,18 @@ class Kohinanpoisto:
         o, P = self.ops, self.P
         return x + o.conv2d(o.relu(o.conv2d(x, P[p + ".res.0.weight"], None, 1)), P[p + ".res.2.weight"], None, 1)
 
-    def __call__(self, x, sigma):
-        """x (n,3,h,w) 0..1 -> siivottu kuva. Kuva täydennetään 8:lla jaolliseksi (kuten alkuperäisessä)."""
+    palaute = None
+
+    def __call__(self, x, sigma, raja=None):
+        """x (n,3,h,w) 0..1 -> siivottu kuva. Suuret kuvat paloissa (reuna 48 px; verkon näkökenttä on
+        laaja, mutta kauempana olevien pikselien vaikutus on häviävän pieni)."""
+        raja = PALOITTAIN_YLI if raja is None else raja
+        if x.shape[0] == 1 and x.shape[2] * x.shape[3] > raja:
+            return paloittain(self.ops, lambda z: self._laske(z, sigma), [x], 48, 1, PALA, self.palaute)
+        return self._laske(x, sigma)
+
+    def _laske(self, x, sigma):
+        """Kuva täydennetään 8:lla jaolliseksi kuten alkuperäisessä toteutuksessa."""
         o, P = self.ops, self.P
         n, _, h, w = x.shape
         ph, pw = (8 - h % 8) % 8, (8 - w % 8) % 8
@@ -766,6 +779,8 @@ class Ketju:
       halo_r       – halon leveys lähteen pikseleinä (DeHalo_alpha rx/ry)
       rae          – filmirakeen voimakkuus 0..1
       rae_koko     – rakeen koko (1080p-kuvan pikseleinä)
+      kohina       – kohinan- ja pakkausjälkien poisto ennen mallia 0..1.5 (DRUNet, sigma = 20 x kohina)
+      kohinamalli  – Kohinanpoisto tai None
     Lähteen pikseleitä ei venytetä ennen mallia: malli saa alkuperäiset pikselit ja
     oikea kuvasuhde tehdään loppuskaalauksessa (testattu: terävämpi kuin esivenytys).
     """
@@ -775,6 +790,7 @@ class Ketju:
         self.h, self.w, self.oh, self.ow = h, w, oh, ow
         self.a = dict(asetus)
         self.malli = self.a.get("malli")
+        self.kohinamalli = self.a.get("kohinamalli") if float(self.a.get("kohina", 0) or 0) > 0 else None
         self.kr, self.kb = KR_KB[matriisi]
         self.palaute = None                 # kuville: funktio(osuus 0..1)
         self.pala_raja = None               # kuville: paloittelu jo pienemmästä koosta (edistyminen, keskeytys)
@@ -868,6 +884,8 @@ class Ketju:
     def rgb_lopullinen(self, x, ensimmainen=0):
         """Lähteen RGB (n,3,h,w) 0..1 -> näytön kokoinen RGB (ennen YUV-muunnosta)."""
         o, a = self.o, self.a
+        if self.kohinamalli is not None:
+            x = self.kohinamalli(o.clamp(x, 0.0, 1.0), 20.0 * float(a["kohina"]), self.pala_raja)
         if a.get("halo", 0) > 0:
             x = self.halonpoisto(x)
         if self.malli is not None:

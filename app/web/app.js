@@ -154,9 +154,11 @@ function piirraAsennus(y) {
     edistys: vaihe === "ffmpeg" ? a.edistys : null});
   const toOk = y.torch === "ok";
   const toKay = vaihe === "torch" || vaihe === "torch_asennus";
-  vaiheet.push({nimi: t("asennus.torch"), kuvaus: t("asennus.torch_kuvaus"), tila: toOk ? "ok" : toKay ? "kaynnissa" : y.torch === "ei_cudaa" ? "virhe" : "",
-    teksti: toOk ? t("asennus.tila_ok") : y.torch === "tarkistetaan" ? t("asennus.tila_tarkistetaan") : toKay ? (vaihe === "torch" && a.tieto && a.tieto.koko ? t("asennus.ladattu", {a: koko(a.tieto.tehty), b: koko(a.tieto.koko)}) : t("asennus.tila_asennetaan")) : t("asennus.tila_odottaa"),
-    edistys: toKay ? (vaihe === "torch" ? a.edistys : -1) : null});
+  const malliKay = vaihe === "mallit";           // kohinanpoistomallin lataus kuuluu tähän vaiheeseen
+  vaiheet.push({nimi: t("asennus.torch"), kuvaus: t("asennus.torch_kuvaus"), tila: toOk && !malliKay ? "ok" : toKay || malliKay ? "kaynnissa" : y.torch === "ei_cudaa" ? "virhe" : "",
+    teksti: malliKay ? (a.tieto && a.tieto.koko ? t("asennus.ladattu", {a: koko(a.tieto.tehty), b: koko(a.tieto.koko)}) : t("asennus.tila_asennetaan"))
+      : toOk ? t("asennus.tila_ok") : y.torch === "tarkistetaan" ? t("asennus.tila_tarkistetaan") : toKay ? (vaihe === "torch" && a.tieto && a.tieto.koko ? t("asennus.ladattu", {a: koko(a.tieto.tehty), b: koko(a.tieto.koko)}) : t("asennus.tila_asennetaan")) : t("asennus.tila_odottaa"),
+    edistys: malliKay ? a.edistys : toKay ? (vaihe === "torch" ? a.edistys : -1) : null});
   const itOk = y.itsetesti && y.itsetesti.ok;
   vaiheet.push({nimi: t("asennus.itsetesti"), kuvaus: itOk && y.itsetesti.nopeus && y.itsetesti.nopeus["2"] ? t("asennus.nopeus", {n: luku(y.itsetesti.nopeus["2"], 1)}) : t("asennus.itsetesti_kuvaus"),
     tila: itOk ? "ok" : vaihe === "itsetesti" ? "kaynnissa" : (y.itsetesti && !y.itsetesti.ok) ? "virhe" : "",
@@ -224,9 +226,11 @@ function nakyma(id) {
   }
   return nakymat[id];
 }
+/* Oletussäädöt: asetuksen perusarvot, joiden päälle tälle tiedostolle mitatut (lähteen laatuun sovitetut). */
 function oletusSaato(n, x) {
   const e = ((onKuva(x) ? TILA.esiasetukset_kuva : TILA.esiasetukset) || {})[String(n)] || {};
-  return {ai: e.ai, rae: e.rae || 0, halo: e.halo || 0};
+  const o = (x && x.koe && x.koe.oletukset && x.koe.oletukset[String(n)]) || {};
+  return {ai: o.ai ?? e.ai, rae: o.rae ?? (e.rae || 0), halo: o.halo ?? (e.halo || 0), kohina: o.kohina ?? (e.kohina || 0)};
 }
 function kohtienMaara(x) { return onKuva(x) ? ((x.koe && x.koe.alueet) || [1]).length : 3; }
 function nykyinenAsetus(x) { return Number((x.valinta || {}).asetus || (x.analyysi || {}).suositus || 2); }
@@ -243,9 +247,11 @@ function arvioAika(x, n) {
 function tyoAllekirjoitus(x) {
   if (!x) return "tyhja:" + KIELI + TILA.ikkuna;
   return JSON.stringify([KIELI, x.id, x.tila, !!x.analyysi, x.koe && x.koe.tila, x.koe && x.koe.tunniste,
-    (x.valinta || {}).asetus, (x.valinta || {}).dar, (x.valinta || {}).skaala, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
+    (x.valinta || {}).asetus, (x.valinta || {}).dar, (x.valinta || {}).skaala, (x.valinta || {}).kierto, (x.valinta || {}).muoto,
+    (x.valinta || {}).laatu, (x.valinta || {}).aanet, (x.valinta || {}).tekstit, (x.valinta || {}).ulkoiset, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
     x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika,
-    x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan]);
+    x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan,
+    TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length]);
 }
 
 function piirraTyo() {
@@ -272,7 +278,39 @@ function tyhjaHtml() {
 }
 
 function skaalaTeksti(v, w, h) {
-  return v === "naytto" ? t("koko.naytto", {w, h}) : t("koko.kerroin", {k: v, w, h});
+  return v === "naytto" ? t("koko.naytto", {w, h}) : v === "1" ? t("koko.yksi", {w, h}) : t("koko.kerroin", {k: v, w, h});
+}
+const B_KOODIT = {ger: "de", fre: "fr", dut: "nl", chi: "zh", cze: "cs", gre: "el", per: "fa", rum: "ro", slo: "sk",
+  ice: "is", wel: "cy", arm: "hy", baq: "eu", mac: "mk", may: "ms", alb: "sq", bur: "my", geo: "ka", tib: "bo"};
+function kielenNimi(koodi) {
+  if (!koodi || koodi === "und") return t("raita.tuntematon");
+  try { return new Intl.DisplayNames([KIELI], {type: "language"}).of(B_KOODIT[koodi] || koodi) || koodi; }
+  catch (e) { return koodi; }
+}
+function raitaTeksti(r) {
+  const osat = [kielenNimi(r.kieli)];
+  if (r.koodekki) osat.push(String(r.koodekki).toUpperCase().replace("DVD_SUBTITLE", "DVD").replace("HDMV_PGS_SUBTITLE", "PGS").replace("SUBRIP", "SRT"));
+  if (r.kanavat) osat.push(r.kanavat === 6 ? "5.1" : r.kanavat === 2 ? "stereo" : r.kanavat === 1 ? "mono" : `${r.kanavat} ch`);
+  return osat.join(" · ") + (r.nimi ? ` – ${r.nimi}` : "");
+}
+function raidatHtml(x, muokattava) {
+  const an = x.analyysi, v = x.valinta || {};
+  const aanet = an.aaniraidat || [], tekstit = an.tekstiraidat || [], ulk = x.ulkoiset_tekstit || [];
+  if (aanet.length < 2 && !tekstit.length && !ulk.length) return "";
+  const ei = muokattava ? "" : "disabled";
+  const valittu = (lista, i) => lista == null || lista.includes(i);
+  const rivi = (laji, r) => `<label class="valinta"><input type="checkbox" data-raita="${laji}" value="${r.i}" ${valittu(v[laji], r.i) ? "checked" : ""} ${ei}><span>${esc(raitaTeksti(r))}</span></label>`;
+  const nA = v.aanet == null ? aanet.length : v.aanet.length;
+  const nT = (v.tekstit == null ? tekstit.length : v.tekstit.length) + (v.ulkoiset === false ? 0 : ulk.length);
+  return `<details class="osio raidat" id="raidat"><summary><span class="raidat-otsikko">${t("raita.otsikko")}</span>
+      <span class="selite">${t("raita.yhteenveto", {a: nA, aa: aanet.length, s: nT, ss: tekstit.length + ulk.length})}</span></summary>
+    ${aanet.length ? `<div class="raita-ryhma">${t("raita.aanet")}</div>${aanet.map(r => rivi("aanet", r)).join("")}` : ""}
+    ${tekstit.length || ulk.length ? `<div class="raita-ryhma">${t("raita.tekstit")}</div>${tekstit.map(r => rivi("tekstit", r)).join("")}
+      ${ulk.map(n => `<label class="valinta"><input type="checkbox" data-raita="ulkoiset" ${v.ulkoiset === false ? "" : "checked"} ${ei}><span>${esc(n)} (${t("raita.ulkoinen")})</span></label>`).join("")}` : ""}
+  </details>`;
+}
+function laatuTeksti(k) {
+  return [t("laatu.kohina." + k.kohina), t("laatu.lohkot." + k.lohkot), t("laatu.teravyys." + k.teravyys)].join(" · ");
 }
 function faktatKuvaHtml(x) {
   const an = x.analyysi, geo = x.geo;
@@ -280,9 +318,11 @@ function faktatKuvaHtml(x) {
   if (an.laatu) lahde += `, ${t("fakta.laatu", {q: an.laatu})}`;
   if (an.alfa) lahde += `, ${t("fakta.lapinakyva")}`;
   const rivit = [[t("fakta.lahde"), lahde], [t("fakta.tyyppi"), t("ktyyppi." + an.tyyppi)]];
+  if (x.koe && x.koe.kuvaus) rivit.push([t("fakta.laatu_lahde"), laatuTeksti(x.koe.kuvaus)]);
   if (geo) {
     rivit.push([t("fakta.tulos"), `${geo.ow}×${geo.oh}`]);
-    rivit.push([t("fakta.tallennus"), an.muoto === "jpeg" ? "JPEG" : "PNG"]);
+    const m_ = (x.valinta || {}).muoto;
+    rivit.push([t("fakta.tallennus"), m_ ? m_.toUpperCase().replace("JPG", "JPEG") : ["jpeg", "heic"].includes(an.muoto) ? "JPEG" : "PNG"]);
   }
   const huomiot = (an.huomiot || []).map(h => `<p class="huomio">${t("huomio." + h)}</p>`).join("");
   return `<dl class="faktat num">${rivit.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join("")}</dl>${huomiot}`;
@@ -307,6 +347,7 @@ function faktatHtml(x) {
     rivit.push([t("fakta.kuvasuhde"), suhde + (rajattu ? `, ${t("fakta.palkit")}` : "")]);
     rivit.push([t("fakta.tulos"), `${geo.ow}×${geo.oh}`]);
   }
+  if (x.koe && x.koe.kuvaus) rivit.push([t("fakta.laatu_lahde"), laatuTeksti(x.koe.kuvaus)]);
   const huomiot = (an.huomiot || []).map(h => `<p class="huomio">${t("huomio." + h)}</p>`).join("")
     + (x.tila === "hd" ? `<p class="huomio">${t("huomio.hd")}</p>` : "");
   return `<dl class="faktat num">${rivit.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join("")}</dl>${huomiot}`;
@@ -315,7 +356,8 @@ function faktatHtml(x) {
 function tyoHtml(x) {
   const n = nykyinenAsetus(x);
   const nk = nakyma(x.id);
-  if (nk.saato === null) nk.saato = Object.assign(oletusSaato(n, x), (x.valinta || {}).saato || {});
+  // käyttäjän säätämättömät arvot seuraavat oletuksia (ne tarkentuvat, kun lähde on mitattu)
+  if (nk.saato === null || (!nk.muokattu && !(x.valinta || {}).saato)) nk.saato = Object.assign(oletusSaato(n, x), (x.valinta || {}).saato || {});
   const otsikko = `<div class="tyo-otsikko"><div class="tyo-nimi"><h1 title="${esc(x.polku)}">${esc(x.nimi)}</h1>
       ${x.analyysi ? faktatHtml(x) : `<div class="polku">${esc(x.polku)}</div>`}</div>
     <div class="tyo-toiminnot"><button class="painike pieni haamu" id="poista">${t("toiminto.poista")}</button>${toimintoHtml(x)}</div></div>`;
@@ -381,11 +423,11 @@ function ohjaimetHtml(x) {
 
 function rajattuEsikatselu(x) {
   const al = (x.koe && x.koe.alueet) || [];
-  return onKuva(x) && x.koe && x.koe.tila === "valmis" && al.some(a => a[2] < x.analyysi.leveys || a[3] < x.analyysi.korkeus);
+  return onKuva(x) && x.koe && x.koe.tila === "valmis" && x.geo && al.some(a => a[2] < x.geo.rajaus[2] || a[3] < x.geo.rajaus[3]);
 }
 function navigaattoriHtml(x) {
   if (!rajattuEsikatselu(x)) return "";
-  const nk = nakyma(x.id), W = x.analyysi.leveys, H = x.analyysi.korkeus;
+  const nk = nakyma(x.id), W = x.geo.rajaus[2], H = x.geo.rajaus[3];
   const pros = (a, b) => `${(100 * a / b).toFixed(3)}%`;
   const alueet = x.koe.alueet.map((a, i) => {
     // siirto kesken: merkki näytetään jo uudessa paikassa
@@ -394,7 +436,7 @@ function navigaattoriHtml(x) {
       style="left:${pros(a[0], W)};top:${pros(a[1], H)};width:${pros(a[2], W)};height:${pros(a[3], H)}" title="${esc(t("navi.kohta", {k: i + 1}))}"><span>${i + 1}</span></button>`;
   }).join("");
   return `<div class="navi"><h3>${t("navi.otsikko")}</h3>
-    <div class="navi-kuva" id="navi" style="aspect-ratio:${W}/${H};width:min(100%, calc(190px * ${W} / ${H}))"><img src="${media(x.id, "yleis.png", String(x.lisatty))}" alt="">${alueet}</div>
+    <div class="navi-kuva" id="navi" style="aspect-ratio:${W}/${H};width:min(100%, calc(190px * ${W} / ${H}))"><img src="${media(x.id, `koe_${x.koe.tunniste}/yleis.png`, x.koe.tunniste)}" alt="">${alueet}</div>
     <p class="selite">${t("navi.ohje", {k: nk.kohta})}</p></div>`;
 }
 
@@ -419,22 +461,44 @@ function paneeliHtml(x, n, muokattava) {
   if (onKuva(x)) {
     const va = (x.geo && x.geo.vaihtoehdot) || {};
     const valittuSk = (x.geo && x.geo.skaala) || "2";
-    lisavalinta = `<div class="osio valinta-rivi"><label for="skaala">${t("koko.otsikko")}</label>
-      <select id="skaala" ${muokattava ? "" : "disabled"} title="${esc(t("koko.selite"))}">${["2", "4", "naytto"].filter(v => va[v]).map(v =>
-        `<option value="${v}" ${v === valittuSk ? "selected" : ""} ${va[v].ok ? "" : "disabled"}>${esc(skaalaTeksti(v, va[v].ow, va[v].oh))}${va[v].ok ? "" : " – " + t("koko.liian_suuri")}</option>`).join("")}</select></div>`;
+    const kierto = (x.valinta || {}).kierto || 0, muoto = (x.valinta || {}).muoto || "";
+    const autoMuoto = ["jpeg", "heic"].includes(x.analyysi.muoto) ? "JPEG" : "PNG";
+    const ei = muokattava ? "" : "disabled";
+    lisavalinta = `<div class="osio valinnat">
+      <div class="valinta-rivi"><label for="skaala">${t("koko.otsikko")}</label>
+      <select id="skaala" ${ei} title="${esc(t("koko.selite"))}">${["1", "2", "4", "naytto"].filter(v => va[v]).map(v =>
+        `<option value="${v}" ${v === valittuSk ? "selected" : ""} ${va[v].ok ? "" : "disabled"}>${esc(skaalaTeksti(v, va[v].ow, va[v].oh))}${va[v].ok ? "" : " – " + t("koko.liian_suuri")}</option>`).join("")}</select></div>
+      <div class="valinta-rivi"><label>${t("kierto.otsikko")}</label><span class="kierto-rivi">
+        <button type="button" class="painike toissijainen pieni" data-kierto="-90" ${ei} title="${esc(t("kierto.vasen"))}" aria-label="${esc(t("kierto.vasen"))}">↺</button>
+        <button type="button" class="painike toissijainen pieni" data-kierto="90" ${ei} title="${esc(t("kierto.oikea"))}" aria-label="${esc(t("kierto.oikea"))}">↻</button>
+        <span class="selite">${kierto ? `${kierto}°` : t("kierto.ei")}</span></span></div>
+      <div class="valinta-rivi"><label for="muoto">${t("muoto.otsikko")}</label>
+      <select id="muoto" ${ei}><option value="" ${!muoto ? "selected" : ""}>${t("muoto.auto", {m: autoMuoto})}</option>
+        <option value="jpg" ${muoto === "jpg" ? "selected" : ""}>JPEG</option><option value="png" ${muoto === "png" ? "selected" : ""}>${t("muoto.png")}</option></select></div>
+    </div>`;
   } else {
-    lisavalinta = `<div class="osio valinta-rivi"><label for="dar">${t("kuvasuhde.otsikko")}</label>
+    const laatu = (x.valinta || {}).laatu || "";
+    lisavalinta = `<div class="osio valinnat"><div class="valinta-rivi"><label for="dar">${t("kuvasuhde.otsikko")}</label>
       <select id="dar" ${muokattava ? "" : "disabled"}>
         <option value="" ${!dar ? "selected" : ""}>${t("kuvasuhde.auto", {v: darAuto})}</option>
         <option value="4:3" ${dar === "4:3" ? "selected" : ""}>${t("kuvasuhde.43")}</option>
-        <option value="16:9" ${dar === "16:9" ? "selected" : ""}>${t("kuvasuhde.169")}</option></select></div>`;
+        <option value="16:9" ${dar === "16:9" ? "selected" : ""}>${t("kuvasuhde.169")}</option></select></div>
+      <div class="valinta-rivi"><label for="laatu">${t("vlaatu.otsikko")}</label>
+      <select id="laatu" ${muokattava ? "" : "disabled"} title="${esc(t("vlaatu.selite"))}"><option value="" ${!laatu ? "selected" : ""}>${t("vlaatu.paras")}</option>
+        <option value="pieni" ${laatu === "pieni" ? "selected" : ""}>${t("vlaatu.pieni")}</option></select></div></div>
+      ${raidatHtml(x, muokattava)}`;
   }
   const saadot = `<div class="osio saadot"><div class="osio-otsikko"><h3>${t("saato.otsikko")}</h3>
       <button type="button" class="linkki" id="palauta" ${muokattava ? "" : "disabled"}>${t("saato.palauta")}</button></div>
-      ${liuku("ai", s.ai ?? 1, 1, aiKaytossa)}${liuku(onKuva(x) ? "rae_kuva" : "rae", s.rae, 1.5)}${liuku("halo", s.halo, 1.5)}</div>`;
+      ${x.koe && x.koe.oletukset ? `<p class="selite sovitettu">${t("saato.sovitettu")}</p>` : ""}
+      ${liuku("kohina", s.kohina ?? 0, 1.5, aiKaytossa)}${liuku("ai", s.ai ?? 1, 1, aiKaytossa)}${liuku("halo", s.halo, 1.5)}${liuku(onKuva(x) ? "rae_kuva" : "rae", s.rae, 1.5)}</div>`;
   const asetukset = `<div class="osio"><h3>${t("asetus.otsikko")}</h3><div class="esivalinnat" id="esivalinnat">${esivalinnat}</div></div>`;
+  // muut saman lajin käsittelemättömät tiedostot: asetukset voi kopioida kerralla kaikkiin
+  const muita = TILA.jono.tyot.filter(y => y.id !== x.id && y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)
+    && !(y.tila === "keskeytetty" && y.aloitettu)).length;
+  const kaikkiin = muokattava && muita ? `<button type="button" class="painike toissijainen pieni kaikkiin" id="kaikkiin" title="${esc(t("kaikkiin.selite"))}">${t(onKuva(x) ? "kaikkiin.kuvat" : "kaikkiin.videot", {n: muita})}</button>` : "";
   // kuvissa koko ja yleiskuva ensin (tärkeimmät valinnat), videoissa kuvasuhde lopussa (harvoin tarpeen)
-  return `<div class="paneeli">${onKuva(x) ? navigaattoriHtml(x) + lisavalinta + asetukset + saadot : asetukset + saadot + lisavalinta}</div>`;
+  return `<div class="paneeli">${onKuva(x) ? navigaattoriHtml(x) + lisavalinta + asetukset + saadot : asetukset + saadot + lisavalinta}${kaikkiin}</div>`;
 }
 
 function toimintoHtml(x) {
@@ -455,7 +519,7 @@ function toimintoHtml(x) {
 /* ------------------------------------------------------------ vertailun kuvat */
 function saatoPoikkeaa(x, n, s) {
   const o = oletusSaato(n, x);
-  return ["ai", "rae", "halo"].some(k => o[k] != null && s[k] != null && Math.abs(o[k] - s[k]) > 0.001);
+  return ["ai", "rae", "halo", "kohina"].some(k => o[k] != null && s[k] != null && Math.abs(o[k] - s[k]) > 0.001);
 }
 let saatoAjastin = null;
 function paivitaKuvat(x, viive = 0) {
@@ -517,6 +581,7 @@ function kytkeTyo(x) {
     const n = Number(r.value);
     const nk = nakyma(id);
     nk.saato = oletusSaato(n, TILA.jono.tyot.find(y => y.id === id));
+    nk.muokattu = false;
     await api("valinta", {id, asetus: n, saato: null}).catch(() => {});
     hae();
   }));
@@ -524,6 +589,7 @@ function kytkeTyo(x) {
     el.addEventListener("input", () => {
       const nk = nakyma(id);
       nk.saato[el.dataset.saato] = Number(el.value);
+      nk.muokattu = true;
       $(`#o-${el.dataset.saato}`).textContent = `${luku(Number(el.value) * 100)} %`;
       const xx = TILA.jono.tyot.find(y => y.id === id); if (xx) paivitaKuvat(xx, 280);
     });
@@ -531,7 +597,7 @@ function kytkeTyo(x) {
   });
   $("#palauta")?.addEventListener("click", () => {
     const xx = TILA.jono.tyot.find(y => y.id === id);
-    const nk = nakyma(id); nk.saato = oletusSaato(nykyinenAsetus(xx), xx);
+    const nk = nakyma(id); nk.saato = oletusSaato(nykyinenAsetus(xx), xx); nk.muokattu = false;
     edellinenTyoAllekirjoitus = ""; tallennaSaato(id); piirraTyo();
   });
   $("#dar")?.addEventListener("change", async e => { await api("valinta", {id, dar: e.target.value || null}).catch(() => {}); hae(); });
@@ -540,6 +606,35 @@ function kytkeTyo(x) {
     await api("valinta", {id, skaala: e.target.value}).catch(() => {}); hae();
   });
   $("#avaa-kuva")?.addEventListener("click", () => api("avaa", {id, mita: "tiedosto"}).catch(() => {}));
+  $$("[data-kierto]").forEach(b => b.addEventListener("click", async () => {
+    const xx = TILA.jono.tyot.find(y => y.id === id);
+    const uusi = ((((xx.valinta || {}).kierto || 0) + Number(b.dataset.kierto)) % 360 + 360) % 360;
+    const nk = nakyma(id); nk.saatoUrl = {}; nk.kohta = 1;
+    await api("valinta", {id, kierto: uusi}).catch(() => {}); hae();
+  }));
+  $("#muoto")?.addEventListener("change", async e => { await api("valinta", {id, muoto: e.target.value || null}).catch(() => {}); hae(); });
+  $("#laatu")?.addEventListener("change", async e => { await api("valinta", {id, laatu: e.target.value || null}).catch(() => {}); hae(); });
+  $("#raidat")?.addEventListener("toggle", e => { nakyma(id).raidatAuki = e.currentTarget.open; });
+  if (nakyma(id).raidatAuki && $("#raidat")) $("#raidat").open = true;
+  $$("[data-raita]").forEach(el => el.addEventListener("change", async () => {
+    const xx = TILA.jono.tyot.find(y => y.id === id); if (!xx) return;
+    const kaikki = laji => (laji === "aanet" ? xx.analyysi.aaniraidat : xx.analyysi.tekstiraidat) || [];
+    const valitut = laji => $$(`[data-raita="${laji}"]`).filter(c => c.checked).map(c => Number(c.value));
+    const d = {id};
+    for (const laji of ["aanet", "tekstit"]) {
+      if (!$$(`[data-raita="${laji}"]`).length) continue;
+      const v = valitut(laji);
+      d[laji] = v.length === kaikki(laji).length ? null : v;
+    }
+    const u = $$('[data-raita="ulkoiset"]');
+    if (u.length) d.ulkoiset = u.every(c => c.checked) ? null : false;
+    await api("valinta", d).catch(() => {}); hae();
+  }));
+  $("#kaikkiin")?.addEventListener("click", async () => {
+    await tallennaSaato(id);
+    const r = await api("valinta_kaikkiin", {id}).catch(() => null);
+    if (r) { ilmoita(t("kaikkiin.tehty", {n: r.n})); Object.keys(nakymat).forEach(k => { if (k !== id) delete nakymat[k]; }); hae(); }
+  });
   $$("[data-kohta]").forEach(b => b.addEventListener("click", () => { nakyma(id).kohta = Number(b.dataset.kohta); paivitaOhjaimet(id); }));
   $$("[data-tila]").forEach(b => b.addEventListener("click", () => { const nk = nakyma(id); nk.tila = b.dataset.tila; nk.oikea = true; paivitaOhjaimet(id); }));
   $$("[data-zoom]").forEach(b => b.addEventListener("click", () => { nakyma(id).zoom = b.dataset.zoom; $("#vertailu").classList.toggle("zoom", b.dataset.zoom === "todellinen"); paivitaOhjaimet(id); }));
@@ -556,10 +651,10 @@ function kytkeTyo(x) {
     }
     const xx = TILA.jono.tyot.find(y => y.id === id); if (!xx || !xx.koe || xx.koe.siirretaan) return;
     const r = e.currentTarget.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width * xx.analyysi.leveys, py = (e.clientY - r.top) / r.height * xx.analyysi.korkeus;
+    const W = xx.geo.rajaus[2], H = xx.geo.rajaus[3];
+    const px = (e.clientX - r.left) / r.width * W, py = (e.clientY - r.top) / r.height * H;
     const valittuAlue = $(`.navi-alue[data-navi="${nk.kohta}"]`), a = xx.koe.alueet[nk.kohta - 1];
     if (valittuAlue && a) {   // siirretään merkki heti, kuvat päivittyvät kun ne on laskettu
-      const W = xx.analyysi.leveys, H = xx.analyysi.korkeus;
       nk.siirto = {k: nk.kohta, x: Math.max(0, Math.min(W - a[2], px - a[2] / 2)), y: Math.max(0, Math.min(H - a[3], py - a[3] / 2))};
       valittuAlue.style.left = `${100 * nk.siirto.x / W}%`;
       valittuAlue.style.top = `${100 * nk.siirto.y / H}%`;
@@ -713,6 +808,7 @@ async function valitseTiedostot() {
 function kytke() {
   kytkeAsetukset();
   $("#lisaa").addEventListener("click", valitseTiedostot);
+  $("#lisaa-kansio").addEventListener("click", async () => lisaysTulos(await api("valitse", {laji: "lisaa_kansio"}).catch(() => null)));
   $("#tyhjenna").addEventListener("click", () => api("tyhjenna_valmiit").then(hae_kerran));
   $("#jono-lista").addEventListener("click", e => {
     const li = e.target.closest(".kohta"); if (!li) return;
