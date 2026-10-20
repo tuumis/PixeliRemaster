@@ -1,6 +1,6 @@
 """PixeliRemaster – käynnistys.
 
-    pythonw.exe kaynnista.py [videotiedostoja ...]
+    pythonw.exe kaynnista.py [video- tai kuvatiedostoja ...]
 
 Jos ohjelma on jo auki, tiedostot lisätään avoinna olevan ikkunan jonoon ja se tuodaan esiin.
 """

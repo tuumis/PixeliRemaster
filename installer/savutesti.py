@@ -50,6 +50,39 @@ for n, cfg in m.ASETUKSET.items():
     assert ero < 0.08, (n, ero)          # kirkkaus säilyy
     print(f"asetus {n}: OK (keskikirkkauden ero {ero:.4f})")
 
+# kuvat: PNG-kirjoitus (luetaan takaisin ilman lisäkirjastoja), EXIF-suunta ja koon valinta
+import struct as _st  # noqa: E402
+import zlib as _zl  # noqa: E402
+from pixeli import kuvat as kv  # noqa: E402
+rng = np.random.default_rng(1)
+rgb_t = rng.integers(0, 256, (13, 17, 3), dtype=np.uint8)
+alfa_t = rng.integers(0, 256, (13, 17), dtype=np.uint8)
+png_p = Path(os.environ["PIXELI_DATA"]) / "testi.png"
+kv.kirjoita_png(png_p, rgb_t, alfa_t, icc=b"sRGB\x00\x00" + _zl.compress(b"x"))
+data = png_p.read_bytes()
+idat, i = b"", 8
+while i < len(data):
+    n_, tyyppi = _st.unpack(">I", data[i:i + 4])[0], data[i + 4:i + 8]
+    if tyyppi == b"IDAT":
+        idat += data[i + 8:i + 8 + n_]
+    i += 12 + n_
+raaka = np.frombuffer(_zl.decompress(idat), np.uint8).reshape(13, 1 + 17 * 4)
+assert (raaka[:, 0] == 2).all()
+rivit = np.cumsum(raaka[:, 1:].astype(np.int64), axis=0) % 256
+assert (rivit.reshape(13, 17, 4)[..., :3] == rgb_t).all() and (rivit.reshape(13, 17, 4)[..., 3] == alfa_t).all()
+assert kv.png_icc(data).startswith(b"sRGB")
+tiff = b"II*\x00" + _st.pack("<I", 8) + _st.pack("<H", 1) + _st.pack("<HHI", 0x0112, 3, 1) + _st.pack("<HH", 6, 0) + b"\0\0\0\0"
+app1 = b"Exif\x00\x00" + tiff
+jpg = b"\xff\xd8\xff\xe1" + _st.pack(">H", len(app1) + 2) + app1 + b"\xff\xda\x00\x02"
+seg = kv.jpeg_segmentit(jpg)
+assert [mk for mk, _, _ in seg] == [0xE1, 0xDA], seg
+assert kv.exif_suunta(jpg[seg[0][1] + 4:seg[0][2]])[0] == 6
+g = kv.geometria_kuva({"leveys": 4032, "korkeus": 3024}, {"skaala": "4"}, (2560, 1440))
+assert g["skaala"] == "2" and (g["ow"], g["oh"]) == (8064, 6048) and not g["vaihtoehdot"]["4"]["ok"], g
+g = kv.geometria_kuva({"leveys": 640, "korkeus": 480}, {"skaala": "naytto"}, (2560, 1440))
+assert (g["ow"], g["oh"], g["kierrokset"]) == (1920, 1440, 2), g
+print("kuvat OK")
+
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
 sov = palvelin.Sovellus(jono, ymp)

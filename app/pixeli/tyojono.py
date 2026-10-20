@@ -1,14 +1,15 @@
 """PixeliRemaster – työjono.
 
-Elokuvat kulkevat tiloissa:
+Videot ja kuvat kulkevat tiloissa:
   analysoidaan -> odottaa -> jonossa -> kasitellaan -> valmis
-                                     \\-> keskeytetty (jatkuu valmiista osista)
-  virhe / hd (jo valmiiksi HD-tarkkuutta, ei käsitellä)
+                                     \\-> keskeytetty (video jatkuu valmiista osista)
+  virhe / hd (video jo valmiiksi HD-tarkkuutta, ei käsitellä)
 
 Säikeet:
-  analyysi  – lyhyt ffmpeg-analyysi heti lisättäessä
-  gpu       – varsinainen käsittely, yksi elokuva kerrallaan
-  koe       – esikatselukuvat ja liikepätkät (oma Laite, voi toimia käsittelyn rinnalla)
+  analyysi  – lyhyt analyysi heti lisättäessä
+  gpu       – videoiden käsittely, yksi kerrallaan
+  koe       – esikatselukuvat, liikepätkät ja kuvien käsittely (oma Laite, toimii videon rinnalla,
+              joten kuva ei jää odottamaan pitkää elokuvaa)
 """
 import json
 import os
@@ -20,9 +21,11 @@ import traceback
 import uuid
 from pathlib import Path
 
+from . import kuvat
 from . import moottori as m
 
 TILAT_KESKEN = ("analysoidaan", "kasitellaan")
+TUETUT = m.VIDEOPAATTEET | kuvat.KUVAPAATTEET
 
 
 def _uusi_id():
@@ -38,7 +41,9 @@ class Jono:
         self.sammuta_valmiina = False
         self.sammutus_ajastettu = False
         self._peruuta = threading.Event()
+        self._peruuta_kuva = threading.Event()
         self._kasiteltava = None
+        self._kasiteltava_kuva = None
         self._herata = threading.Event()
         self._analyysi_q = queue.Queue()
         self._koe_q = queue.Queue()
@@ -62,7 +67,7 @@ class Jono:
         d = m.lue_json(self._tiedosto(), {}) or {}
         for t in d.get("tyot", []):
             if t.get("tila") == "kasitellaan" or t.get("tila") == "jonossa":
-                t["tila"] = "keskeytetty"
+                t["tila"] = "odottaa" if t.get("laji") == "kuva" else "keskeytetty"
             t["koe"] = {k: v for k, v in (t.get("koe") or {}).items() if k != "tila"} | {"tila": (
                 "valmis" if (t.get("koe") or {}).get("tunniste") else "ei")}
             t["liike"] = {}
@@ -117,6 +122,10 @@ class Jono:
 
     def _paivita_geometria(self, t):
         an = t["analyysi"]
+        if t.get("laji") == "kuva":
+            t["geo"] = kuvat.geometria_kuva(an, t.get("valinta") or {}, self.kohde())
+            t["arvio_nopeus"] = None
+            return
         geo = m.geometria(an, t.get("valinta") or {}, self.kohde())
         t["geo"] = geo
         n = int((t.get("valinta") or {}).get("asetus") or an["suositus"])
@@ -134,21 +143,22 @@ class Jono:
         for p in polut:
             p = Path(str(p).strip().strip('"'))
             if p.is_dir():
-                tiedostot += sorted(f for f in p.iterdir() if f.is_file() and f.suffix.lower() in m.VIDEOPAATTEET)
+                tiedostot += sorted(f for f in p.iterdir() if f.is_file() and f.suffix.lower() in TUETUT)
             elif p.is_file():
                 tiedostot.append(p)
         with self.lukko:
             olemassa = {os.path.normcase(str(Path(t["polku"]).resolve())) for t in self.tyot}
             for f in tiedostot:
                 avain = os.path.normcase(str(f.resolve()))
-                if f.suffix.lower() not in m.VIDEOPAATTEET or "[Remaster]" in f.name:
-                    ohitetut.append({"nimi": f.name, "syy": "ei_video" if f.suffix.lower() not in m.VIDEOPAATTEET
+                if f.suffix.lower() not in TUETUT or "[Remaster]" in f.name:
+                    ohitetut.append({"nimi": f.name, "syy": "ei_tuettu" if f.suffix.lower() not in TUETUT
                                      else "oma_tulos"})
                     continue
                 if avain in olemassa:
                     ohitetut.append({"nimi": f.name, "syy": "jo_jonossa"})
                     continue
                 t = {"id": _uusi_id(), "polku": str(f.resolve()), "nimi": f.name, "lisatty": time.time(),
+                     "laji": "kuva" if kuvat.on_kuva(f) else "video",
                      "tila": "analysoidaan", "valinta": {}, "koe": {"tila": "ei"}, "liike": {}}
                 self.tyot.append(t)
                 olemassa.add(avain)
@@ -162,6 +172,8 @@ class Jono:
             t = self._tyo(tid)
             if self._kasiteltava == tid:
                 self._peruuta.set()
+            if self._kasiteltava_kuva == tid:
+                self._peruuta_kuva.set()
             self.tyot.remove(t)
         self._tallenna()
 
@@ -192,20 +204,28 @@ class Jono:
                 v["saato"] = s or None
             if "dar" in valinta:
                 v["dar"] = valinta["dar"] if valinta["dar"] in ("4:3", "16:9") else None
+            if "skaala" in valinta:
+                v["skaala"] = valinta["skaala"] if valinta["skaala"] in kuvat.SKAALAT else None
             t["valinta"] = {k: x for k, x in v.items() if x is not None}
             if t.get("analyysi"):
+                vanha = (t.get("koe") or {}).get("tunniste")
                 self._paivita_geometria(t)
-                if "dar" in valinta:
+                if ("dar" in valinta or "skaala" in valinta) and vanha != self._koe_tunniste(t):
                     t["koe"] = {"tila": "ei"}
         self._tallenna()
 
     def aloita(self, tid=None):
         with self.lukko:
             for t in self.tyot:
-                if (tid is None or t["id"] == tid) and t["tila"] in ("odottaa", "keskeytetty", "virhe") \
+                # valmiin kuvan voi käsitellä uudelleen toisilla asetuksilla (vain yksittäin)
+                uudelleen = tid is not None and t.get("laji") == "kuva" and t["tila"] == "valmis"
+                if (tid is None or t["id"] == tid) and (t["tila"] in ("odottaa", "keskeytetty", "virhe") or uudelleen) \
                         and t.get("analyysi"):
                     t["tila"] = "jonossa"
                     t.pop("virhe", None)
+                    t.pop("tulos", None)
+                    if t.get("laji") == "kuva":
+                        self._koe_q.put(("kuva", t["id"], None))
         self._tallenna()
         self._herata.set()
 
@@ -214,9 +234,11 @@ class Jono:
         with self.lukko:
             for t in self.tyot:
                 if (tid is None or t["id"] == tid) and t["tila"] == "jonossa":
-                    t["tila"] = "keskeytetty" if t.get("aloitettu") else "odottaa"
+                    t["tila"] = "keskeytetty" if t.get("aloitettu") and t.get("laji") != "kuva" else "odottaa"
             if self._kasiteltava and (tid is None or tid == self._kasiteltava):
                 self._peruuta.set()
+            if self._kasiteltava_kuva and (tid is None or tid == self._kasiteltava_kuva):
+                self._peruuta_kuva.set()
         self._tallenna()
 
     def esikatsele(self, tid):
@@ -241,6 +263,8 @@ class Jono:
             an, geo, wd = t["analyysi"], t["geo"], self._wd(t)
         s = {kk: float(v) for kk, v in (saato or {}).items() if kk in m.SAATO_AVAIMET}
         L = self._laite("esikatselu")
+        if t.get("laji") == "kuva":
+            return kuvat.saatokuva_kuva(Path(t["polku"]), an, geo, wd, L, int(asetus), s or None, int(k))
         return m.saatokuva(Path(t["polku"]), an, geo, wd, L, int(asetus), s or None, int(k))
 
     def aseta_sammutus(self, paalla):
@@ -255,6 +279,7 @@ class Jono:
     def lopeta(self):
         self._lopeta = True
         self._peruuta.set()
+        self._peruuta_kuva.set()
         self._herata.set()
         self._koe_q.put(None)
         self._analyysi_q.put(None)
@@ -270,7 +295,9 @@ class Jono:
                 if an:
                     d["analyysi"] = {k: an.get(k) for k in (
                         "leveys", "korkeus", "koodekki", "kesto", "fps", "R", "lomitus", "desimointi",
-                        "tyyppi", "suositus", "tekstityksia", "huomiot", "rajaus", "dar_levy")}
+                        "tyyppi", "suositus", "tekstityksia", "huomiot", "rajaus", "dar_levy",
+                        "laji", "muoto", "laatu", "alfa")}
+                d.setdefault("laji", "video")
                 tyot.append(d)
             jonossa = [t for t in self.tyot if t["tila"] in ("jonossa", "kasitellaan")]
             jaljella = 0.0
@@ -278,13 +305,17 @@ class Jono:
                 e = t.get("edistys") or {}
                 if t["tila"] == "kasitellaan" and e.get("jaljella_s"):
                     jaljella += e["jaljella_s"]
+                elif t.get("laji") == "kuva":
+                    n = str((t.get("valinta") or {}).get("asetus") or (t.get("analyysi") or {}).get("suositus"))
+                    jaljella += ((t.get("koe") or {}).get("aika") or {}).get(n) or 5.0
                 elif t.get("arvio_nopeus") and t.get("analyysi"):
                     an = t["analyysi"]
                     from fractions import Fraction
                     jaljella += an["kesto"] * float(Fraction(an["R"])) / t["arvio_nopeus"]
             return {"tyot": tyot, "asetukset": self.asetukset, "kohde": list(self.kohde()),
                     "sammuta_valmiina": self.sammuta_valmiina, "sammutus_ajastettu": self.sammutus_ajastettu,
-                    "jono_jaljella_s": jaljella if jonossa else None, "kasiteltava": self._kasiteltava}
+                    "jono_jaljella_s": jaljella if jonossa else None, "kasiteltava": self._kasiteltava,
+                    "kasiteltava_kuva": self._kasiteltava_kuva}
 
     # ------------------------------------------------------------ säikeet
     def _analyysi_saie(self):
@@ -302,17 +333,19 @@ class Jono:
                 with self.lukko:
                     t = self._tyo(tid)
                     polku, wd = Path(t["polku"]), self._wd(t)
+                    laji = t.get("laji") or ("kuva" if kuvat.on_kuva(polku) else "video")
                 if not polku.exists():
                     raise RuntimeError("tiedostoa_ei_loydy")
-                an = m.analysoi(polku, wd)
+                an = kuvat.analysoi_kuva(polku, wd) if laji == "kuva" else m.analysoi(polku, wd)
                 with self.lukko:
                     t = self._tyo(tid)
+                    t["laji"] = laji
                     t["analyysi"] = an
                     self._paivita_geometria(t)
                     if t["tila"] == "analysoidaan":
                         t["tila"] = "hd" if an["tyyppi"] == "hd" else "odottaa"
                     vanha = (t.get("koe") or {}).get("tunniste")
-                    if vanha and vanha != m.koe_tunniste(t["geo"]):
+                    if vanha and vanha != self._koe_tunniste(t):
                         t["koe"] = {"tila": "ei"}
             except KeyError:
                 return
@@ -322,18 +355,27 @@ class Jono:
                     try:
                         t = self._tyo(tid)
                         t["tila"] = "virhe"
-                        t["virhe"] = {"avain": str(e) if str(e) in ("ffmpeg_puuttuu", "tiedostoa_ei_loydy")
+                        t["virhe"] = {"avain": str(e) if str(e) in ("ffmpeg_puuttuu", "tiedostoa_ei_loydy",
+                                                                     "liian_suuri")
                                       else "analyysi", "tieto": str(e)[-300:]}
                     except KeyError:
                         pass
             self._tallenna()
 
+    def _koe_tunniste(self, t):
+        return kuvat.koe_tunniste(t["geo"]) if t.get("laji") == "kuva" else m.koe_tunniste(t["geo"])
+
     def _seuraava(self):
+        """Seuraava video (kuvat käsitellään koe-säikeessä)."""
         with self.lukko:
             for t in self.tyot:
-                if t["tila"] == "jonossa":
+                if t["tila"] == "jonossa" and t.get("laji") != "kuva":
                     return t
         return None
+
+    def _kaikki_valmiit(self):
+        with self.lukko:
+            return not any(t["tila"] in ("jonossa", "kasitellaan") for t in self.tyot)
 
     def _gpu_saie(self):
         while not self._lopeta:
@@ -408,9 +450,65 @@ class Jono:
                     t.pop("edistys", None) if t["tila"] != "keskeytetty" else None
                 m.pysy_hereilla(False)
                 self._tallenna()
-            if self._seuraava() is None and self.sammuta_valmiina and t["tila"] == "valmis" and not self._lopeta:
+            if self._kaikki_valmiit() and self.sammuta_valmiina and t["tila"] == "valmis" and not self._lopeta \
+                    and not self.sammutus_ajastettu:
                 self._sammuta()
             self._herata.set()
+
+    def _kasittele_kuva(self, tid):
+        with self.lukko:
+            try:
+                t = self._tyo(tid)
+            except KeyError:
+                return
+            if t["tila"] != "jonossa" or self._lopeta:
+                return
+            self._peruuta_kuva.clear()
+            t["tila"] = "kasitellaan"
+            t["edistys"] = {"tehty": 0, "kaikki": 1000}
+            self._kasiteltava_kuva = tid
+            polku, an, geo, valinta = Path(t["polku"]), t["analyysi"], t["geo"], dict(t.get("valinta") or {})
+            wd = self._wd(t)
+            ulos = m.ulostulo_polku(polku, self.asetukset.get("ulos_kansio"), kuvat.ulostulo_paate(an))
+        self._tallenna()
+
+        def edistys(e, t=t):
+            with self.lukko:
+                t["edistys"] = e
+
+        try:
+            if not polku.exists():
+                raise RuntimeError("tiedostoa_ei_loydy")
+            L = self._laite("esikatselu")
+            tulos = kuvat.kasittele_kuva(polku, an, geo, valinta, wd, L, ulos, edistys=edistys,
+                                         peruuta=self._peruuta_kuva)
+            with self.lukko:
+                t["tila"] = "valmis"
+                t["tulos"] = tulos
+                t["valmistui"] = time.time()
+            m.loki(f"Valmis: {tulos['ulos']}")
+        except m.Peruutettu:
+            with self.lukko:
+                t["tila"] = "odottaa"
+        except Exception as e:  # noqa: BLE001
+            m.loki(f"Kuvan käsittely epäonnistui ({polku}): {traceback.format_exc()}")
+            muisti = "out of memory" in str(e).lower() or type(e).__name__ == "OutOfMemoryError"
+            with self.lukko:
+                t["tila"] = "virhe"
+                t["virhe"] = {"avain": "muisti" if muisti else str(e) if str(e) in (
+                    "ffmpeg_puuttuu", "tiedostoa_ei_loydy", "malli_puuttuu") else "kuva", "tieto": str(e)[-600:]}
+            try:
+                self._laite("esikatselu").tyhjenna()
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            with self.lukko:
+                self._kasiteltava_kuva = None
+                t.pop("edistys", None)
+            self._tallenna()
+        if self._kaikki_valmiit() and self.sammuta_valmiina and t["tila"] == "valmis" and not self._lopeta \
+                and not self.sammutus_ajastettu:
+            self._sammuta()
 
     def _sammuta(self):
         self.sammutus_ajastettu = True
@@ -432,6 +530,8 @@ class Jono:
     def _esikatselu(self, laji, tid, param):
             while not self.ymp.valmis() and not self._lopeta:
                 time.sleep(1)
+            if laji == "kuva":
+                return self._kasittele_kuva(tid)
             try:
                 with self.lukko:
                     t = self._tyo(tid)
@@ -444,7 +544,13 @@ class Jono:
                     with self.lukko:
                         kohde["edistys"] = a / max(1, b)
 
-                if laji == "koe":
+                if laji == "koe" and t.get("laji") == "kuva":
+                    tiedot = kuvat.koekuvat_kuva(polku, an, geo, wd, L, edistys=ed)
+                    with self.lukko:
+                        if t.get("koe") is kohde:
+                            t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"], "aika": tiedot["aika"],
+                                        "alueet": tiedot["alueet"]}
+                elif laji == "koe":
                     tiedot = m.koekuvat(polku, an, geo, wd, L, edistys=ed)
                     with self.lukko:
                         t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"],

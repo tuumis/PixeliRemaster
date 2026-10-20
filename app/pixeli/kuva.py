@@ -181,12 +181,27 @@ class NumpyOps:
     def float(self, x):
         return x
 
+    def zeros(self, shape, mallina):
+        return np.zeros(shape, dtype=mallina.dtype)
+
+    def lisaa_(self, a, b):
+        a += b
+        return a
+
+    def group_norm_suuri(self, x, g, w, b, eps=1e-5):
+        return self.group_norm(x, g, w, b, eps)
+
+    def uint8_hwc(self, x):
+        """(1,3,h,w) float 0..1 -> (h,w,3) uint8"""
+        return (np.clip(x[0], 0, 1).transpose(1, 2, 0) * 255.0 + 0.5).astype(np.uint8)
+
 
 # ============================================================== ops: torch
 
 
 class TorchOps:
     nimi = "torch"
+    kaista_alkiot = 1 << 22      # GroupNormin kaistan koko suurilla kuvilla
 
     def __init__(self, laite="cuda", puolitarkkuus=True):
         import torch
@@ -278,6 +293,42 @@ class TorchOps:
     def float(self, x):
         return x.float()
 
+    def zeros(self, shape, mallina):
+        return self.torch.zeros(shape, dtype=mallina.dtype, device=mallina.device)
+
+    def lisaa_(self, a, b):
+        return a.add_(b)
+
+    def group_norm_suuri(self, x, g, w, b, eps=1e-5):
+        """GroupNorm suurelle kuvalle kaistoittain (koko kuvan tilastot, muisti ei kasva).
+        Tulos kirjoitetaan x:n päälle."""
+        torch = self.torch
+        n, c, h, ww = x.shape
+        cg = c // g
+        kaista = max(1, self.kaista_alkiot // max(1, cg * ww))
+        for i in range(n):
+            for gi in range(g):
+                ka = slice(gi * cg, (gi + 1) * cg)
+                maara = cg * h * ww
+                summa = 0.0
+                for r0 in range(0, h, kaista):
+                    summa += float(x[i, ka, r0:r0 + kaista].sum(dtype=torch.float64))
+                ka_arvo = summa / maara
+                vari = 0.0
+                for r0 in range(0, h, kaista):
+                    vari += float(((x[i, ka, r0:r0 + kaista].float() - ka_arvo) ** 2).sum(dtype=torch.float64))
+                kerroin = 1.0 / math.sqrt(vari / maara + eps)
+                wk = w[ka].float().view(-1, 1, 1) * kerroin
+                bk = b[ka].float().view(-1, 1, 1)
+                for r0 in range(0, h, kaista):
+                    osa = x[i, ka, r0:r0 + kaista]
+                    osa.copy_(((osa.float() - ka_arvo) * wk + bk).to(x.dtype))
+        return x
+
+    def uint8_hwc(self, x):
+        t = (self.torch.clamp(x[0].float(), 0, 1) * 255.0 + 0.5).to(self.torch.uint8)
+        return t.permute(1, 2, 0).contiguous().cpu().numpy()
+
 
 # ============================================================== skaalausmatriisit
 
@@ -364,8 +415,21 @@ def _fuse_conv3xc(sd, p):
     return W.astype(np.float32), B.astype(np.float32)
 
 
+# Suuret kuvat lasketaan paloissa. Palojen reunoille otetaan mukaan mallin näkökentän verran
+# naapuripikseleitä, ja tulos rajataan, joten tulos on sama kuin koko kuvan kerralla laskettuna.
+PALA = 512                  # palan koko lähteen pikseleinä
+PALOITTAIN_YLI = 1_000_000  # paloitellaan, kun kuvassa on enemmän pikseleitä
+
+
 class Malli:
-    """SPAN- tai RealPLKSR-malli tilasanakirjasta. Arkkitehtuuri tunnistetaan avaimista."""
+    """SPAN- tai RealPLKSR-malli tilasanakirjasta. Arkkitehtuuri tunnistetaan avaimista.
+
+    palaute: valinnainen funktio(osuus 0..1), jota kutsutaan paloittain laskettaessa.
+    """
+
+    palaute = None
+    pala = PALA
+    raja = PALOITTAIN_YLI
 
     def __init__(self, ops, sd):
         self.ops = ops
@@ -392,7 +456,14 @@ class Malli:
         self.skaala = int(round(math.sqrt(sd["upsampler.0.weight"].shape[0] / 3)))
         self.P = P
 
-    def _span_fwd(self, x):
+    def _span_fwd(self, x, raja):
+        if x.shape[0] == 1 and x.shape[2] * x.shape[3] > raja:
+            # näkökenttä 21 px: conv_1 + 6 lohkoa x 3 + conv_2 + upsampler (3x3)
+            return self._paloittain(self._span_koko, [x], reuna=24, skaala=self.skaala,
+                                    osuus=(0.0, 1.0))
+        return self._span_koko(x)
+
+    def _span_koko(self, x):
         o, P = self.ops, self.P
 
         def c(n, t, pad=1):
@@ -439,23 +510,70 @@ class Malli:
         self.ryhmat = 4
         self.P = P
 
-    def _plksr_fwd(self, x):
-        o, P = self.ops, self.P
-        f = o.conv2d(x, *P["alku"], 1)
-        for L in self.lohkot:
-            t = o.conv2d(f, *L["channel_mixer.0"], 1)
-            t = o.mish(t)
-            t = o.conv2d(t, *L["channel_mixer.2"], 1)
-            t = o.cat([o.conv2d(t[:, :self.pdim], *L["lk.conv"], self.lk_pad), t[:, self.pdim:]])
-            t = t * o.sigmoid(o.conv2d(t, *L["attn.f.0"], 1))
-            t = o.conv2d(t, *L["refine"], 0)
-            t = o.group_norm(t, self.ryhmat, *L["norm"])
-            f = t + f
-        f = o.conv2d(f, *P["loppu"], 1) + o.repeat_ch(x, self.skaala * self.skaala)
+    def _plksr_lohko(self, L, f):
+        """Lohko ennen GroupNormia (GroupNorm tarvitsee koko kuvan tilastot)."""
+        o = self.ops
+        t = o.conv2d(f, *L["channel_mixer.0"], 1)
+        t = o.mish(t)
+        t = o.conv2d(t, *L["channel_mixer.2"], 1)
+        t = o.cat([o.conv2d(t[:, :self.pdim], *L["lk.conv"], self.lk_pad), t[:, self.pdim:]])
+        t = t * o.sigmoid(o.conv2d(t, *L["attn.f.0"], 1))
+        return o.conv2d(t, *L["refine"], 0)
+
+    def _plksr_loppu(self, f, x):
+        o = self.ops
+        f = o.conv2d(f, *self.P["loppu"], 1) + o.repeat_ch(x, self.skaala * self.skaala)
         return o.pixel_shuffle(f, self.skaala)
 
-    def __call__(self, x):
-        return self._span_fwd(x) if self.tyyppi == "SPAN" else self._plksr_fwd(x)
+    def _plksr_fwd(self, x, raja):
+        o, P = self.ops, self.P
+        if x.shape[0] == 1 and x.shape[2] * x.shape[3] > raja:
+            return self._plksr_paloittain(x)
+        f = o.conv2d(x, *P["alku"], 1)
+        for L in self.lohkot:
+            t = self._plksr_lohko(L, f)
+            t = o.group_norm(t, self.ryhmat, *L["norm"])
+            f = t + f
+        return self._plksr_loppu(f, x)
+
+    def _plksr_paloittain(self, x):
+        """Lohko kerrallaan: jokainen lohko lasketaan paloissa (näkökenttä 11 px), GroupNorm koko
+        kuvan tilastoilla. Tulos vastaa koko kuvan laskentaa."""
+        o, P = self.ops, self.P
+        n = len(self.lohkot) + 2
+        f = self._paloittain(lambda z: o.conv2d(z, *P["alku"], 1), [x], 2, 1, (0, 1 / n))
+        for i, L in enumerate(self.lohkot, 1):
+            t = self._paloittain(lambda z, L=L: self._plksr_lohko(L, z), [f], 12, 1, (i / n, (i + 1) / n))
+            t = o.group_norm_suuri(t, self.ryhmat, *L["norm"])
+            f = o.lisaa_(f, t)
+            del t
+        return self._paloittain(self._plksr_loppu, [f, x], 2, self.skaala, ((n - 1) / n, 1.0))
+
+    def _paloittain(self, fn, syotteet, reuna, skaala, osuus):
+        """Laskee fn(*syotteet) paloissa. Kaikilla syötteillä sama korkeus ja leveys."""
+        o = self.ops
+        h, w = syotteet[0].shape[2], syotteet[0].shape[3]
+        P = self.pala
+        palat = [(y0, x0) for y0 in range(0, h, P) for x0 in range(0, w, P)]
+        ulos = None
+        for i, (y0, x0) in enumerate(palat):
+            y1, x1 = min(h, y0 + P), min(w, x0 + P)
+            a0, b0 = max(0, y0 - reuna), max(0, x0 - reuna)
+            a1, b1 = min(h, y1 + reuna), min(w, x1 + reuna)
+            r = fn(*[s_[:, :, a0:a1, b0:b1] for s_ in syotteet])
+            if ulos is None:
+                ulos = o.zeros((r.shape[0], r.shape[1], h * skaala, w * skaala), r)
+            s = skaala
+            ulos[:, :, y0 * s:y1 * s, x0 * s:x1 * s] = r[:, :, (y0 - a0) * s:(y1 - a0) * s, (x0 - b0) * s:(x1 - b0) * s]
+            del r
+            if self.palaute:
+                self.palaute(osuus[0] + (osuus[1] - osuus[0]) * (i + 1) / len(palat))
+        return ulos
+
+    def __call__(self, x, raja=None):
+        """raja: paloitellaan, kun pikseleitä on enemmän (oletus self.raja)."""
+        raja = self.raja if raja is None else raja
+        return self._span_fwd(x, raja) if self.tyyppi == "SPAN" else self._plksr_fwd(x, raja)
 
     puoli = False
 
@@ -495,21 +613,30 @@ class Ketju:
     oikea kuvasuhde tehdään loppuskaalauksessa (testattu: terävämpi kuin esivenytys).
     """
 
-    def __init__(self, ops, h, w, oh, ow, asetus, matriisi="bt601"):
+    def __init__(self, ops, h, w, oh, ow, asetus, matriisi="bt601", yuv=True):
         self.o = o = ops
         self.h, self.w, self.oh, self.ow = h, w, oh, ow
         self.a = dict(asetus)
         self.malli = self.a.get("malli")
         self.kr, self.kb = KR_KB[matriisi]
+        self.palaute = None                 # kuville: funktio(osuus 0..1)
+        self.pala_raja = None               # kuville: paloittelu jo pienemmästä koosta (edistyminen, keskeytys)
         s = self.malli.skaala if self.malli else 1
-        self.mh, self.mw = h * s, w * s
-        # perinteinen skaalaus lähteestä mallin resoluutioon (AI-osuuden sekoitusta varten)
+        # kierrokset: 4x kuvalle malli ajetaan kahdesti (2x + 2x)
+        self.kierrokset = max(1, int(self.a.get("kierrokset", 1))) if self.malli else 1
+        self.koot = [(h * s ** i, w * s ** i) for i in range(self.kierrokset + 1)]
+        self.mh, self.mw = self.koot[-1]
+        # perinteinen skaalaus kierroksen lähteestä mallin resoluutioon (AI-osuuden sekoitusta varten)
+        self.W_m = []
         if self.malli and float(self.a.get("ai", 1.0)) < 1.0:
-            self.Wy_m = o.param(skaalausmatriisi(h, self.mh, "catmullrom"))
-            self.Wx_m = o.param(skaalausmatriisi(w, self.mw, "catmullrom"))
-        # loppuskaalaus näytön kokoon
-        self.Wy_o = o.param(skaalausmatriisi(self.mh, oh, "catmullrom" if oh >= self.mh else "mitchell"))
-        self.Wx_o = o.param(skaalausmatriisi(self.mw, ow, "catmullrom" if ow >= self.mw else "mitchell"))
+            for (ah, aw), (bh, bw) in zip(self.koot, self.koot[1:]):
+                self.W_m.append((o.param(skaalausmatriisi(ah, bh, "catmullrom")),
+                                 o.param(skaalausmatriisi(aw, bw, "catmullrom"))))
+        # loppuskaalaus näytön kokoon (ohitetaan, jos koko on jo oikea)
+        self.Wy_o = self.Wx_o = None
+        if (oh, ow) != (self.mh, self.mw):
+            self.Wy_o = o.param(skaalausmatriisi(self.mh, oh, "catmullrom" if oh >= self.mh else "mitchell"))
+            self.Wx_o = o.param(skaalausmatriisi(self.mw, ow, "catmullrom" if ow >= self.mw else "mitchell"))
         # halonpoisto
         if self.a.get("halo", 0) > 0:
             r = float(self.a.get("halo_r", 2.0))
@@ -528,8 +655,9 @@ class Ketju:
             self.Gy = o.param(g.reshape(1, 1, -1, 1).astype(np.float32))
             self.Gx = o.param(g.reshape(1, 1, 1, -1).astype(np.float32))
             self.rae_pad = r
-        # YUV 4:2:0
-        self.Cy, self.Cx = [o.param(m) for m in alinaytteistys_matriisit(oh, ow)]
+        # YUV 4:2:0 (vain video)
+        if yuv:
+            self.Cy, self.Cx = [o.param(m) for m in alinaytteistys_matriisit(oh, ow)]
 
     # ---------------------------------------------------------- vaiheet
     def luma(self, x, kr=None, kb=None):
@@ -586,17 +714,32 @@ class Ketju:
         if a.get("halo", 0) > 0:
             x = self.halonpoisto(x)
         if self.malli is not None:
-            xm = o.clamp(x, 0.0, 1.0)
-            ai = o.float(self.malli(o.half(xm) if self.malli.puoli else xm))
             osuus = float(a.get("ai", 1.0))
-            if osuus < 1.0:
-                perus = o.matresize(x, self.Wy_m, self.Wx_m)
-                ai = perus + (ai - perus) * osuus
-            x = ai
-        y = o.matresize(x, self.Wy_o, self.Wx_o)
+            # edistyminen painotetaan pikselimäärällä (toinen kierros on 4 kertaa suurempi)
+            painot = [kh * kw for kh, kw in self.koot[:-1]]
+            kertyma = 0.0
+            for k in range(self.kierrokset):
+                if self.palaute:
+                    alku, osa = kertyma / sum(painot), painot[k] / sum(painot)
+                    self.palaute(alku)
+                    self.malli.palaute = lambda f, alku=alku, osa=osa: self.palaute(alku + osa * f)
+                kertyma += painot[k]
+                xm = o.clamp(x, 0.0, 1.0)
+                try:
+                    ai = o.float(self.malli(o.half(xm) if self.malli.puoli else xm, self.pala_raja))
+                finally:
+                    self.malli.palaute = None
+                if osuus < 1.0:
+                    perus = o.matresize(x, *self.W_m[k])
+                    ai = perus + (ai - perus) * osuus
+                    del perus
+                x = ai
+                del ai
+        if self.Wy_o is not None:
+            x = o.matresize(x, self.Wy_o, self.Wx_o)
         if a.get("rae", 0) > 0:
-            y = self.rae(y, ensimmainen)
-        return y
+            x = self.rae(x, ensimmainen)
+        return x
 
     def __call__(self, x, ensimmainen=0):
         return self.yuv420p10(self.rgb_lopullinen(x, ensimmainen))

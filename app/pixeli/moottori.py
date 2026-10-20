@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.0.0"
+VERSIO = "1.1.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -783,8 +783,11 @@ class Laite:
             self._mallit[nimi] = m
         return self._mallit[nimi]
 
-    def asetus(self, n, saato=None):
+    def asetus(self, n, saato=None, kuva=False):
         a = dict(ASETUKSET[int(n)])
+        if kuva:
+            from .kuvat import KUVA_MUUTOKSET
+            a.update(KUVA_MUUTOKSET)
         for k, v in (saato or {}).items():
             if k in SAATO_AVAIMET and v is not None:
                 lo, hi = SAATO_RAJAT[k]
@@ -801,6 +804,11 @@ class Laite:
 
     def vapauta(self):
         self._mallit.clear()
+        if self.cuda:
+            self.torch.cuda.empty_cache()
+
+    def tyhjenna(self):
+        """Vapauttaa välitulosten muistin (mallit säilyvät)."""
         if self.cuda:
             self.torch.cuda.empty_cache()
 
@@ -1011,11 +1019,11 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
     return tulos
 
 
-def ulostulo_polku(src, kansio=None):
+def ulostulo_polku(src, kansio=None, paate=".mkv"):
     """Valmiin tiedoston polku: alkuperäisen viereen tai valittuun kansioon; jos ei kirjoitusoikeutta,
     datakansion Valmiit-kansioon."""
     src = Path(src)
-    nimi = f"{src.stem} [Remaster].mkv"
+    nimi = f"{src.stem} [Remaster]{paate}"
     ehdokkaat = [Path(kansio) / nimi] if kansio else []
     ehdokkaat += [src.with_name(nimi), DATA / "Valmiit" / nimi]
     for p in ehdokkaat:

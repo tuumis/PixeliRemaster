@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import asennus
+from . import kuvat
 from . import moottori as m
 
 WEB = m.SOVELLUS / "web"
@@ -49,11 +50,15 @@ class Sovellus:
         self.portti = None
 
     def tila(self):
-        esiasetukset = {str(n): {"ai": a.get("ai", 1.0) if a.get("malli") else None,
-                                 "rae": a.get("rae", 0.0), "halo": a.get("halo", 0.0), "malli": a.get("malli")}
-                        for n, a in m.ASETUKSET.items()}
+        def esi(kuva):
+            tulos = {}
+            for n, a in m.ASETUKSET.items():
+                a = dict(a, **(kuvat.KUVA_MUUTOKSET if kuva else {}))
+                tulos[str(n)] = {"ai": a.get("ai", 1.0) if a.get("malli") else None, "rae": a.get("rae", 0.0),
+                                 "halo": a.get("halo", 0.0), "malli": a.get("malli")}
+            return tulos
         return {"versio": m.VERSIO, "ymparisto": self.ymp.nayta(), "jono": self.jono.tila(),
-                "esiasetukset": esiasetukset,
+                "esiasetukset": esi(False), "esiasetukset_kuva": esi(True),
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
                 "datakansio": str(m.DATA), "aika": time.time()}
@@ -90,7 +95,7 @@ class Sovellus:
             j.siirra(d["id"], int(d.get("suunta", 1)))
             return {}
         if polku == "valinta":
-            j.aseta_valinta(d["id"], {k: d[k] for k in ("asetus", "saato", "dar") if k in d})
+            j.aseta_valinta(d["id"], {k: d[k] for k in ("asetus", "saato", "dar", "skaala") if k in d})
             return {}
         if polku == "esikatsele":
             j.esikatsele(d["id"])
@@ -120,6 +125,12 @@ class Sovellus:
                 asennus.avaa_kansio(m.LOKI if m.LOKI.exists() else m.DATA)
             elif d.get("mita") == "data":
                 asennus.avaa_kansio(m.DATA)
+            elif d.get("mita") == "tiedosto":
+                t = j._tyo(d["id"])
+                ulos = (t.get("tulos") or {}).get("ulos")
+                if not ulos or not Path(ulos).is_file():
+                    raise KeyError("tiedostoa_ei_loydy")
+                asennus.avaa_tiedosto(ulos)
             else:
                 t = j._tyo(d["id"])
                 kohde = (t.get("tulos") or {}).get("ulos") or t["polku"]

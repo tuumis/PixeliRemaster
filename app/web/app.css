@@ -184,6 +184,8 @@ button,input,select{font:inherit;color:inherit}
 .palauta{margin-top:10px}
 .kuvasuhde{margin-top:16px;padding-top:14px;border-top:1px solid var(--viiva);font-size:13.5px}
 .kuvasuhde select{background:var(--nosto);border:1px solid var(--viiva);border-radius:var(--r-pieni);padding:5px 8px;margin-top:6px;width:100%}
+.kuvasuhde .selite{margin:6px 0 0;line-height:1.35}
+.valmis-kortti .toiminnot{flex-wrap:nowrap}
 
 /* käsittelyn edistyminen */
 .kaynnissa{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center;background:var(--paneeli);

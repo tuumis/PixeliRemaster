@@ -230,6 +230,14 @@ def avaa_kansio(polku):
         subprocess.Popen(["xdg-open", str(polku.parent if polku.is_file() else polku)])
 
 
+def avaa_tiedosto(polku):
+    """Avaa tiedoston oletusohjelmalla (esim. valmis kuva Valokuvat-sovelluksessa)."""
+    if os.name == "nt":
+        os.startfile(str(polku))  # noqa: S606
+    else:
+        subprocess.Popen(["xdg-open", str(polku)])
+
+
 def tiedostovalinta_powershell(kansio=False):
     """Windowsin tiedosto-/kansiovalinta ilman lisäkirjastoja (varalla, jos pywebview ei ole käytössä)."""
     if os.name != "nt":
@@ -241,7 +249,8 @@ def tiedostovalinta_powershell(kansio=False):
     else:
         skripti = ("Add-Type -AssemblyName System.Windows.Forms;"
                    "$d=New-Object System.Windows.Forms.OpenFileDialog;$d.Multiselect=$true;"
-                   "$d.Filter='Video|*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv|*|*.*';"
+                   "$d.Filter='Video / Kuva|*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv;"
+                   "*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.tif;*.tiff|*|*.*';"
                    "if($d.ShowDialog() -eq 'OK'){[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
                    "$d.FileNames -join \"`n\"}")
     r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", skripti], capture_output=True,

@@ -37,14 +37,14 @@ Name: "fi"; MessagesFile: "compiler:Languages\Finnish.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-fi.Kontekstivalikko=Lisää videotiedostojen hiiren oikean painikkeen valikkoon "Paranna PixeliRemasterilla"
-en.Kontekstivalikko=Add "Enhance with PixeliRemaster" to the right-click menu of video files
+fi.Kontekstivalikko=Lisää video- ja kuvatiedostojen hiiren oikean painikkeen valikkoon "Paranna PixeliRemasterilla"
+en.Kontekstivalikko=Add "Enhance with PixeliRemaster" to the right-click menu of video and image files
 fi.Paranna=Paranna PixeliRemasterilla
 en.Paranna=Enhance with PixeliRemaster
 fi.Kaynnista=Käynnistä PixeliRemaster
 en.Kaynnista=Launch PixeliRemaster
-fi.PoistaData=Poistetaanko myös ladatut komponentit (tekoälykirjasto, videotyökalut) ja työtiedostot?%n%n%1%n%nValmiit videot eivät poistu.
-en.PoistaData=Also remove downloaded components (AI library, video tools) and working files?%n%n%1%n%nFinished videos are not removed.
+fi.PoistaData=Poistetaanko myös ladatut komponentit (tekoälykirjasto, videotyökalut) ja työtiedostot?%n%n%1%n%nValmiit videot ja kuvat eivät poistu.
+en.PoistaData=Also remove downloaded components (AI library, video tools) and working files?%n%n%1%n%nFinished videos and images are not removed.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -64,8 +64,8 @@ Name: "{autoprograms}\PixeliRemaster"; Filename: "{app}\python\pythonw.exe"; Par
 Name: "{autodesktop}\PixeliRemaster"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\kaynnista.py"""; WorkingDir: "{app}\app"; IconFilename: "{app}\app\web\pixeli.ico"; AppUserModelID: "PixeliRemaster.Sovellus"; Tasks: desktopicon
 
 [Registry]
-; "Paranna PixeliRemasterilla" videotiedostojen hiiren oikean painikkeen valikkoon
-#dim Paatteet[11] {".mkv", ".mp4", ".avi", ".vob", ".mpg", ".mpeg", ".m2v", ".ts", ".m4v", ".mov", ".wmv"}
+; "Paranna PixeliRemasterilla" video- ja kuvatiedostojen hiiren oikean painikkeen valikkoon
+#dim Paatteet[18] {".mkv", ".mp4", ".avi", ".vob", ".mpg", ".mpeg", ".m2v", ".ts", ".m4v", ".mov", ".wmv", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 #define i 0
 #sub RekisteriRivit
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\{#Paatteet[i]}\shell\PixeliRemaster"; ValueType: string; ValueName: ""; ValueData: "{cm:Paranna}"; Flags: uninsdeletekey; Tasks: kontekstivalikko

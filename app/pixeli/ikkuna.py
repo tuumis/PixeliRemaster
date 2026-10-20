@@ -13,14 +13,18 @@ from pathlib import Path
 
 from . import moottori as m
 
-VIDEOSUODATIN = ("Video (*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv)",
-                 "Video files (*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv)")
+_VIDEO = "*.mkv;*.mp4;*.avi;*.vob;*.mpg;*.mpeg;*.m2v;*.ts;*.m4v;*.mov;*.wmv"
+_KUVA = "*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.tif;*.tiff"
+SUODATTIMET = {
+    "fi": (f"Videot ja kuvat ({_VIDEO};{_KUVA})", f"Videot ({_VIDEO})", f"Kuvat ({_KUVA})", "Kaikki tiedostot (*.*)"),
+    "en": (f"Videos and images ({_VIDEO};{_KUVA})", f"Videos ({_VIDEO})", f"Images ({_KUVA})", "All files (*.*)"),
+}
 
 SULJE_TEKSTI = {
-    "fi": ("Käsittely on kesken", "Elokuvan käsittely on kesken. Suljetaanko ohjelma?\n\n"
-           "Käsittely jatkuu samasta kohdasta, kun avaat ohjelman uudelleen."),
-    "en": ("Processing in progress", "A movie is being processed. Close the program?\n\n"
-           "Processing will continue where it left off the next time you open the program."),
+    "fi": ("Käsittely on kesken", "Käsittely on kesken. Suljetaanko ohjelma?\n\n"
+           "Videon käsittely jatkuu samasta kohdasta, kun avaat ohjelman uudelleen."),
+    "en": ("Processing in progress", "Processing is in progress. Close the program?\n\n"
+           "Video processing will continue where it left off the next time you open the program."),
 }
 
 
@@ -49,7 +53,7 @@ class PywebviewIkkuna:
             pass
 
     def _sulkeutuu(self):
-        if self.sov.jono._kasiteltava:
+        if self.sov.jono._kasiteltava or self.sov.jono._kasiteltava_kuva:
             otsikko, teksti = SULJE_TEKSTI.get(self.kieli(), SULJE_TEKSTI["en"])
             try:
                 return bool(self.ikkuna.create_confirmation_dialog(otsikko, teksti))
@@ -90,9 +94,8 @@ class PywebviewIkkuna:
         if kansio:
             r = self.ikkuna.create_file_dialog(getattr(wv, "FOLDER_DIALOG", 20))
         else:
-            suodin = VIDEOSUODATIN[0] if self.kieli() == "fi" else VIDEOSUODATIN[1]
             r = self.ikkuna.create_file_dialog(getattr(wv, "OPEN_DIALOG", 10), allow_multiple=True,
-                                               file_types=(suodin, "All files (*.*)"))
+                                               file_types=SUODATTIMET.get(self.kieli(), SUODATTIMET["en"]))
         if not r:
             return []
         return [r] if isinstance(r, str) else list(r)
