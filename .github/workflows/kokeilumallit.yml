@@ -2,6 +2,12 @@ name: Kokeilumallit (kehitys)
 
 # Kehitystyökalu: kopioi annetut mallitiedostot kokeilujulkaisuun (kokeilu-1) vertailuja varten.
 # Ohjelma ei käytä näitä; käytössä olevat mallit ovat app/pixeli/lisamallit.py:n luettelossa.
+#
+# Osoitteen muodot:
+#   URL                      tiedosto sellaisenaan
+#   URL#polun_loppu          zip-paketista se tiedosto, jonka polku päättyy annettuun
+#   URL#polun_loppu!generaattori  lisäksi PyTorch Lightning -tarkistuspisteestä vain
+#                            "generator."-alkuiset painot (tallennetaan nimellä <nimi>_generaattori.pth)
 on:
   workflow_dispatch:
     inputs:
@@ -17,15 +23,61 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Lataa ja julkaise
         env:
           GH_TOKEN: ${{ github.token }}
           OSOITTEET: ${{ github.event.inputs.osoitteet }}
         run: |
-          mkdir -p kokeilu
-          for u in $OSOITTEET; do
-            f="kokeilu/$(basename "${u%%\?*}")"
-            curl -sSfL --retry 3 -o "$f" "$u"
+          python -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          mkdir -p kokeilu lataus
+          for kohta in $OSOITTEET; do
+            u="${kohta%%#*}"
+            jalki=""
+            [ "$u" != "$kohta" ] && jalki="${kohta#*#}"
+            jasen="${jalki%%!*}"
+            muunnos=""
+            [ "$jasen" != "$jalki" ] && muunnos="${jalki#*!}"
+            f="lataus/$(basename "${u%%\?*}")"
+            [ -f "$f" ] || curl -sSfL --retry 3 -o "$f" "$u"
+            if [ -n "$jasen" ]; then
+              m=$(unzip -Z1 "$f" | grep -E "${jasen}\$" | head -1)
+              echo "::notice title=zip::$m"
+              unzip -p "$f" "$m" > "kokeilu/$(basename "$m")"
+              f="kokeilu/$(basename "$m")"
+            else
+              cp "$f" kokeilu/
+              f="kokeilu/$(basename "$f")"
+            fi
+            if [ "$muunnos" = "generaattori" ]; then
+              python - "$f" <<'EOF'
+          import sys, pickle, torch
+          from pathlib import Path
+          class Tyhja:
+              def __init__(self, *a, **k): pass
+              def __setstate__(self, s): pass
+              def __call__(self, *a, **k): return self
+          class U(pickle.Unpickler):
+              def find_class(self, mod, name):
+                  try:
+                      return super().find_class(mod, name)
+                  except Exception:
+                      return Tyhja
+          class M: Unpickler = U; load = pickle.load; __name__ = "pickle"
+          p = Path(sys.argv[1])
+          ck = torch.load(p, map_location="cpu", weights_only=False, pickle_module=M)
+          sd = ck.get("state_dict", ck)
+          g = {k[len("generator."):]: v for k, v in sd.items() if k.startswith("generator.")}
+          ulos = p.with_name(p.stem + "_generaattori.pth")
+          torch.save(g, ulos)
+          p.unlink()
+          print("::notice title=generaattori::", ulos.name, len(g), "avainta")
+          EOF
+            fi
+          done
+          for f in kokeilu/*; do
             echo "::notice title=kokeilu::$(basename "$f") $(stat -c %s "$f") $(sha256sum "$f" | cut -d' ' -f1)"
           done
           if ! gh release view kokeilu-1 >/dev/null 2>&1; then
