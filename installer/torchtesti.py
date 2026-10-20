@@ -44,7 +44,7 @@ with torch.inference_mode():
         mt.palaute = osat.append
         pal = ot.numpy(mt(ot.tensor(x)))
         ero = float(np.abs(koko - pal).max())
-        print(f"{nimi}: paloittain torch vs numpy {ero:.2e}, palautteita {len(osat)}")
+        print(f"::notice title=torchtesti::{nimi}: paloittain torch vs numpy {ero:.2e}")
         assert ero < 2e-4, (nimi, ero)
         assert osat and abs(osat[-1] - 1.0) < 1e-6
 
@@ -56,7 +56,7 @@ with torch.inference_mode():
     ot.kaista_alkiot = 16 * 41 * 5            # useita kaistoja
     tulos = ot.numpy(ot.group_norm_suuri(tt, 4, ot.param(w_), ot.param(b_)))
     ero = float(np.abs(viite - tulos).max())
-    print(f"group_norm_suuri {ero:.2e}")
+    print(f"::notice title=torchtesti::group_norm_suuri {ero:.2e}")
     assert ero < 1e-4, ero
 
     # 3) kaksi kierrosta + AI-osuus + uint8
@@ -68,7 +68,7 @@ with torch.inference_mode():
     yt = kuva.Ketju(ot, 24, 32, 90, 120, a_t, yuv=False).rgb_lopullinen(ot.tensor(xs))
     un, ut = on.uint8_hwc(yn), ot.uint8_hwc(yt)
     ero = int(np.abs(un.astype(int) - ut.astype(int)).max())
-    print(f"4x-ketju uint8 ero {ero}, koko {ut.shape}")
+    print(f"::notice title=torchtesti::4x-ketju uint8 ero {ero}")
     assert ut.shape == (90, 120, 3) and ero <= 1
 
 # 4) koko kuvan käsittely (vaatii ffmpegin)
@@ -95,7 +95,7 @@ if m.ffmpeg_ok():
         ulos = m.ulostulo_polku(s_, d / "ulos", kv.ulostulo_paate(an))
         r = kv.kasittele_kuva(s_, an, geo, {"asetus": n}, wd, L, ulos)
         im = Image.open(r["ulos"])
-        print(s_.name, an["leveys"], an["korkeus"], an["tyyppi"], "->", im.size, im.mode, koe["aika"])
+        print(f"::notice title=torchtesti::{s_.name} {an['leveys']}x{an['korkeus']} {an['tyyppi']} -> {im.size} {im.mode}")
         if s_ == src:
             assert im.size == (120, 160), im.size                      # suunta 6: pystykuva
             assert im.getexif().get(0x0112) == 1
@@ -106,5 +106,5 @@ if m.ffmpeg_ok():
             al = np.asarray(im)[..., 3]
             assert al[:, :70].mean() > 240 and al[:, 90:].mean() < 15
 else:
-    print("ffmpeg ei käytettävissä, kuvien käsittelytesti ohitetaan")
+    print("::warning title=torchtesti::ffmpeg ei käytettävissä, kuvien käsittelytesti ohitetaan")
 print("TORCHTESTI OK")
