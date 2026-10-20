@@ -1,0 +1,29 @@
+name: Julkaise AI-mallit
+
+# Kopioi lisämallit alkuperäisistä lähteistä ohjelman omaan julkaisuun (mallit-1),
+# josta PixeliRemaster lataa ne tarvittaessa. Ajetaan käsin, kun luetteloon lisätään malli.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mallit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lataa ja tarkista mallit
+        run: python3 installer/mallit.py dist_mallit
+
+      - name: Julkaise
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view mallit-1 >/dev/null 2>&1; then
+            gh release create mallit-1 --prerelease --title "AI-mallit / AI models" \
+              --notes "PixeliRemaster lataa nämä mallit automaattisesti tarvittaessa – niitä ei tarvitse ladata käsin. Lisenssit: KOLMANNET_OSAPUOLET.md. / PixeliRemaster downloads these models automatically when needed. Licenses: KOLMANNET_OSAPUOLET.md."
+          fi
+          gh release upload mallit-1 dist_mallit/* --clobber
+          gh release view mallit-1 --json assets -q '.assets[] | "::notice title=mallit::\(.name) \(.size)"'
