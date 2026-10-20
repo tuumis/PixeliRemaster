@@ -1,0 +1,35 @@
+name: Kokeilumallit (kehitys)
+
+# Kehitystyökalu: kopioi annetut mallitiedostot kokeilujulkaisuun (kokeilu-1) vertailuja varten.
+# Ohjelma ei käytä näitä; käytössä olevat mallit ovat app/pixeli/lisamallit.py:n luettelossa.
+on:
+  workflow_dispatch:
+    inputs:
+      osoitteet:
+        description: "Mallien osoitteet välilyönnein eroteltuina"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  kopioi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lataa ja julkaise
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OSOITTEET: ${{ github.event.inputs.osoitteet }}
+        run: |
+          mkdir -p kokeilu
+          for u in $OSOITTEET; do
+            f="kokeilu/$(basename "${u%%\?*}")"
+            curl -sSfL --retry 3 -o "$f" "$u"
+            echo "::notice title=kokeilu::$(basename "$f") $(stat -c %s "$f") $(sha256sum "$f" | cut -d' ' -f1)"
+          done
+          if ! gh release view kokeilu-1 >/dev/null 2>&1; then
+            gh release create kokeilu-1 --prerelease --title "Kokeilumallit (kehitys)" \
+              --notes "Kehitysvaiheen vertailuja varten. Ohjelma ei käytä näitä."
+          fi
+          gh release upload kokeilu-1 kokeilu/* --clobber
