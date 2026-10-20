@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="2" y="2" width="60" height="60" rx="13" fill="#24262B"/>
+  <!-- levy: oikea puoli sileä -->
+  <path d="M32 9 A21 21 0 0 1 32 51 Z" fill="#E9EAEC"/>
+  <!-- vasen puoli pikseleinä (sama ympyrä 6 px ruudukossa) -->
+  <path d="M32 9 H26 V12 H20 V15 H17 V18 H14 V24 H11 V36 H14 V42 H17 V45 H20 V48 H26 V51 H32 Z" fill="#9AA0A8"/>
+  <circle cx="32" cy="30" r="5" fill="#24262B"/>
+  <rect x="31" y="7" width="2" height="46" fill="#24262B"/>
+  <!-- kalibrointipalkit -->
+  <g transform="translate(12 54)">
+    <rect x="0" width="6" height="3" fill="#C0C0C0"/><rect x="6" width="6" height="3" fill="#C0C000"/>
+    <rect x="12" width="6" height="3" fill="#00C0C0"/><rect x="18" width="6" height="3" fill="#00C000"/>
+    <rect x="24" width="6" height="3" fill="#C000C0"/><rect x="30" width="5" height="3" fill="#C00000"/>
+    <rect x="35" width="5" height="3" fill="#0000C0"/>
+  </g>
+</svg>

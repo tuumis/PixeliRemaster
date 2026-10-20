@@ -1,0 +1,602 @@
+"""PixeliRemaster – kuvankäsittelyketju.
+
+Kaikki algoritmit (AI-mallit, halonpoisto, skaalaus, filmirae, YUV-muunnos) on
+kirjoitettu kerran `ops`-rajapinnan päälle. Rajapinnasta on kaksi toteutusta:
+
+  TorchOps  – näytönohjaimella (CUDA, fp16/fp32), varsinainen käsittely
+  NumpyOps  – prosessorilla, referenssi ja asennuksen itsetesti
+
+Itsetesti ajaa saman kuvan molemmilla ja vertaa tuloksia, joten näytönohjain-
+toteutuksen oikeellisuus tarkistetaan jokaisella koneella erikseen.
+"""
+import math
+import pickle
+import zipfile
+import collections
+import numpy as np
+
+# ============================================================== mallitiedostot
+
+
+def lataa_pth(polku):
+    """Lukee PyTorchin .pth-tiedoston numpy-taulukoiksi ilman PyTorchia.
+    Tiedosto on zip, jonka sisällä pickle; vain tensorit ja sanakirjat sallitaan."""
+    DT = {"FloatStorage": np.float32, "HalfStorage": np.float16, "BFloat16Storage": None,
+          "DoubleStorage": np.float64, "LongStorage": np.int64, "IntStorage": np.int32}
+    zf = zipfile.ZipFile(polku)
+    nimet = zf.namelist()
+    pkl = next(n for n in nimet if n.endswith("data.pkl"))
+    juuri = pkl[: -len("data.pkl")]
+
+    class Lukija(pickle.Unpickler):
+        def find_class(self, mod, name):
+            if name == "_rebuild_tensor_v2":
+                def rb(storage, offset, size, stride, *a):
+                    if not size:
+                        return storage[offset:offset + 1].reshape(()).copy()
+                    it = storage.itemsize
+                    return np.lib.stride_tricks.as_strided(
+                        storage[offset:], shape=size, strides=[s * it for s in stride]).copy()
+                return rb
+            if name == "_rebuild_parameter":
+                return lambda data, *a: data
+            if name == "OrderedDict":
+                return collections.OrderedDict
+            if mod.startswith("torch") and name.endswith("Storage"):
+                return name
+            raise pickle.UnpicklingError(f"Ei sallittu: {mod}.{name}")
+
+        def persistent_load(self, pid):
+            _, styp, key, _loc, n = pid
+            if not isinstance(styp, str):
+                styp = getattr(styp, "__name__", str(styp))
+            dt = DT[styp]
+            raw = zf.read(f"{juuri}data/{key}")
+            return np.frombuffer(raw, dtype=dt)[:n]
+
+    sd = Lukija(zf.open(pkl)).load()
+    for k in ("params_ema", "params", "state_dict"):
+        if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
+            sd = sd[k]
+    return {k: np.asarray(v, dtype=np.float32) for k, v in sd.items()}
+
+
+# ============================================================== ops: numpy
+
+
+class NumpyOps:
+    nimi = "numpy"
+
+    def param(self, a):
+        return np.ascontiguousarray(np.asarray(a, dtype=np.float32))
+
+    def tensor(self, a):
+        return np.ascontiguousarray(np.asarray(a, dtype=np.float32))
+
+    def numpy(self, x):
+        return np.asarray(x, dtype=np.float32)
+
+    # --- konvoluutio (ristikorrelaatio kuten torch.nn.functional.conv2d)
+    def conv2d(self, x, w, b=None, pad=0):
+        n, c, h, ww = x.shape
+        o, ci, kh, kw = w.shape
+        assert ci == c, (ci, c)
+        if pad:
+            x = np.pad(x, ((0, 0), (0, 0), (pad, pad), (pad, pad)))
+        oh, ow = x.shape[2] - kh + 1, x.shape[3] - kw + 1
+        if kh * kw >= 49:
+            out = self._conv_fft(x, w, oh, ow)
+        else:
+            out = np.zeros((n, o, oh, ow), np.float32)
+            for i in range(kh):
+                for j in range(kw):
+                    out += np.einsum("oc,nchw->nohw", w[:, :, i, j], x[:, :, i:i + oh, j:j + ow],
+                                     optimize=True)
+        if b is not None:
+            out += b.reshape(1, -1, 1, 1)
+        return out
+
+    @staticmethod
+    def _conv_fft(x, w, oh, ow):
+        n, c, hp, wp = x.shape
+        o, _, kh, kw = w.shape
+        fh, fw = hp + kh - 1, wp + kw - 1
+        X = np.fft.rfft2(x.astype(np.float64), s=(fh, fw))
+        K = np.fft.rfft2(w[:, :, ::-1, ::-1].astype(np.float64), s=(fh, fw))
+        Y = np.einsum("nchw,ochw->nohw", X, K, optimize=True)
+        y = np.fft.irfft2(Y, s=(fh, fw))
+        return y[:, :, kh - 1:kh - 1 + oh, kw - 1:kw - 1 + ow].astype(np.float32)
+
+    def silu(self, x):
+        return x * self.sigmoid(x)
+
+    def sigmoid(self, x):
+        return 0.5 * (1.0 + np.tanh(0.5 * x))
+
+    def mish(self, x):
+        return x * np.tanh(np.logaddexp(0.0, x))
+
+    def group_norm(self, x, g, w, b, eps=1e-5):
+        n, c, h, ww = x.shape
+        t = x.reshape(n, g, -1).astype(np.float64)
+        m = t.mean(-1, keepdims=True)
+        v = t.var(-1, keepdims=True)
+        t = ((t - m) / np.sqrt(v + eps)).reshape(n, c, h, ww).astype(np.float32)
+        return t * w.reshape(1, -1, 1, 1) + b.reshape(1, -1, 1, 1)
+
+    def pixel_shuffle(self, x, r):
+        n, c, h, w = x.shape
+        c2 = c // (r * r)
+        return x.reshape(n, c2, r, r, h, w).transpose(0, 1, 4, 2, 5, 3).reshape(n, c2, h * r, w * r)
+
+    def repeat_ch(self, x, r):
+        return np.repeat(x, r, axis=1)
+
+    def cat(self, xs):
+        return np.concatenate(xs, axis=1)
+
+    def max3(self, x):
+        p = np.pad(x, ((0, 0), (0, 0), (1, 1), (1, 1)), mode="edge")
+        h, w = x.shape[2], x.shape[3]
+        return np.max(np.stack([p[:, :, i:i + h, j:j + w] for i in range(3) for j in range(3)]), axis=0)
+
+    def min3(self, x):
+        return -self.max3(-x)
+
+    def matresize(self, x, wy, wx):
+        """x (n,c,h,w), wy (oh,h), wx (ow,w) -> (n,c,oh,ow)"""
+        t = np.matmul(x, wx.T)
+        return np.matmul(wy, t)
+
+    def clamp(self, x, lo, hi):
+        return np.clip(x, lo, hi)
+
+    def where(self, c, a, b):
+        return np.where(c, a, b)
+
+    def randn(self, shape, seed):
+        return np.random.default_rng(seed).standard_normal(shape, dtype=np.float32)
+
+    def to_int16(self, x):
+        return np.rint(x).astype(np.int16)
+
+    def cat_n(self, xs):
+        return np.concatenate(xs, axis=0)
+
+    def pad_reflect(self, x, p):
+        return np.pad(x, ((0, 0), (0, 0), (p, p), (p, p)), mode="reflect")
+
+    def pakkaa(self, y, u, v):
+        """(n,1,h,w)+(n,1,h/2,w/2)x2 -> (n, L) int16, tasot peräkkäin (yuv420p10le)."""
+        n = y.shape[0]
+        return np.concatenate([y.reshape(n, -1), u.reshape(n, -1), v.reshape(n, -1)], axis=1)
+
+    def from_uint8(self, a):
+        """(n,h,w,3) uint8 -> (n,3,h,w) float 0..1"""
+        return np.ascontiguousarray(a.transpose(0, 3, 1, 2)).astype(np.float32) / 255.0
+
+    def half(self, x):
+        return x
+
+    def float(self, x):
+        return x
+
+
+# ============================================================== ops: torch
+
+
+class TorchOps:
+    nimi = "torch"
+
+    def __init__(self, laite="cuda", puolitarkkuus=True):
+        import torch
+        import torch.nn.functional as F
+        self.torch, self.F = torch, F
+        self.dev = torch.device(laite)
+        self.ht = puolitarkkuus and self.dev.type == "cuda"
+        self._gen = None
+
+    def param(self, a):
+        return self.torch.from_numpy(np.ascontiguousarray(np.asarray(a, np.float32))).to(self.dev)
+
+    def tensor(self, a):
+        return self.param(a)
+
+    def numpy(self, x):
+        return x.detach().float().cpu().numpy()
+
+    def conv2d(self, x, w, b=None, pad=0):
+        if x.dtype != w.dtype:
+            w = w.to(x.dtype)
+            b = b.to(x.dtype) if b is not None else None
+        return self.F.conv2d(x, w, b, padding=pad)
+
+    def silu(self, x):
+        return self.F.silu(x)
+
+    def sigmoid(self, x):
+        return self.torch.sigmoid(x)
+
+    def mish(self, x):
+        return self.F.mish(x)
+
+    def group_norm(self, x, g, w, b, eps=1e-5):
+        return self.F.group_norm(x.float(), g, w.float(), b.float(), eps).to(x.dtype)
+
+    def pixel_shuffle(self, x, r):
+        return self.F.pixel_shuffle(x, r)
+
+    def repeat_ch(self, x, r):
+        return self.torch.repeat_interleave(x, r, dim=1)
+
+    def cat(self, xs):
+        return self.torch.cat(xs, dim=1)
+
+    def max3(self, x):
+        p = self.F.pad(x, (1, 1, 1, 1), mode="replicate")
+        return self.F.max_pool2d(p, 3, stride=1)
+
+    def min3(self, x):
+        return -self.max3(-x)
+
+    def matresize(self, x, wy, wx):
+        wy, wx = wy.to(x.dtype), wx.to(x.dtype)
+        return self.torch.matmul(wy, self.torch.matmul(x, wx.transpose(0, 1)))
+
+    def clamp(self, x, lo, hi):
+        return self.torch.clamp(x, lo, hi)
+
+    def where(self, c, a, b):
+        return self.torch.where(c, a, b)
+
+    def randn(self, shape, seed):
+        if self._gen is None:
+            self._gen = self.torch.Generator(device=self.dev)
+        self._gen.manual_seed(int(seed))
+        return self.torch.randn(shape, generator=self._gen, device=self.dev, dtype=self.torch.float32)
+
+    def to_int16(self, x):
+        return self.torch.round(x).to(self.torch.int16)
+
+    def cat_n(self, xs):
+        return self.torch.cat(xs, dim=0)
+
+    def pad_reflect(self, x, p):
+        return self.F.pad(x, (p, p, p, p), mode="reflect")
+
+    def pakkaa(self, y, u, v):
+        t = self.torch.cat([y.flatten(1), u.flatten(1), v.flatten(1)], dim=1)
+        return t.cpu().numpy()
+
+    def from_uint8(self, a):
+        t = self.torch.from_numpy(a).to(self.dev, non_blocking=True)
+        return t.permute(0, 3, 1, 2).float().div_(255.0).contiguous()
+
+    def half(self, x):
+        return x.half() if self.ht else x
+
+    def float(self, x):
+        return x.float()
+
+
+# ============================================================== skaalausmatriisit
+
+
+def _bicubic(b, c):
+    def k(x):
+        x = np.abs(x)
+        x2, x3 = x * x, x * x * x
+        r = np.zeros_like(x)
+        m1 = x < 1
+        m2 = (x >= 1) & (x < 2)
+        r[m1] = ((12 - 9 * b - 6 * c) * x3[m1] + (-18 + 12 * b + 6 * c) * x2[m1] + (6 - 2 * b)) / 6
+        r[m2] = ((-b - 6 * c) * x3[m2] + (6 * b + 30 * c) * x2[m2] + (-12 * b - 48 * c) * x[m2]
+                 + (8 * b + 24 * c)) / 6
+        return r
+    return k, 2.0
+
+
+def _lanczos(a):
+    def k(x):
+        x = np.abs(x)
+        r = np.sinc(x) * np.sinc(x / a)
+        r[x >= a] = 0
+        return r
+    return k, float(a)
+
+
+SUOTIMET = {
+    "catmullrom": _bicubic(0.0, 0.5),
+    "mitchell": _bicubic(1 / 3, 1 / 3),
+    "bspline": _bicubic(1.0, 0.0),
+    "hermite": _bicubic(0.0, 0.0),
+    "lanczos3": _lanczos(3),
+}
+
+
+def skaalausmatriisi(n_in, n_out, suodin="catmullrom", siirto=0.0):
+    """Tiheä (n_out, n_in) -painomatriisi. Pienennettäessä ydin levitetään (antialias).
+    Reunoilla pikselit toistetaan. `siirto` siirtää näytteenottoa lähteen pikseleinä."""
+    k, tuki = SUOTIMET[suodin]
+    s = n_out / n_in
+    leveys = 1.0 / s if s < 1 else 1.0
+    x = (np.arange(n_out) + 0.5) / s - 0.5 + siirto
+    vasen = np.floor(x - tuki * leveys).astype(int) + 1
+    n_tap = int(math.ceil(2 * tuki * leveys)) + 1
+    idx = vasen[:, None] + np.arange(n_tap)[None, :]
+    w = k((idx - x[:, None]) / leveys)
+    w = w / w.sum(1, keepdims=True)
+    W = np.zeros((n_out, n_in), np.float64)
+    np.add.at(W, (np.repeat(np.arange(n_out), n_tap), np.clip(idx, 0, n_in - 1).ravel()), w.ravel())
+    return W.astype(np.float32)
+
+
+def alinaytteistys_matriisit(h, w):
+    """4:2:0-värien alinäytteistys: vaakasuunnassa vasemmalle sijoitettu [1,2,1]/4,
+    pystysuunnassa kahden rivin keskiarvo (MPEG-2/H.264/HEVC-oletussijainti)."""
+    wy = np.zeros((h // 2, h), np.float32)
+    for i in range(h // 2):
+        wy[i, 2 * i] = wy[i, 2 * i + 1] = 0.5
+    wx = np.zeros((w // 2, w), np.float32)
+    for i in range(w // 2):
+        for d, p in ((-1, 0.25), (0, 0.5), (1, 0.25)):
+            wx[i, min(max(2 * i + d, 0), w - 1)] += p
+    return wy, wx
+
+
+# ============================================================== AI-mallit
+
+
+def _fuse_conv3xc(sd, p):
+    """SPANin Conv3XC: 1x1 -> 3x3 -> 1x1 + 1x1-ohitus yhdistetään yhdeksi 3x3-konvoluutioksi
+    (sama laskutoimitus kuin alkuperäisen update_params)."""
+    w1, b1 = sd[p + ".conv.0.weight"], sd[p + ".conv.0.bias"]
+    w2, b2 = sd[p + ".conv.1.weight"], sd[p + ".conv.1.bias"]
+    w3, b3 = sd[p + ".conv.2.weight"], sd[p + ".conv.2.bias"]
+    a = w1[:, :, 0, 0].astype(np.float64)              # (g, cin)
+    k = np.einsum("mgij,gc->mcij", w2.astype(np.float64), a)
+    c3 = w3[:, :, 0, 0].astype(np.float64)              # (cout, m)
+    W = np.einsum("om,mcij->ocij", c3, k)
+    bb = (w2.astype(np.float64) * b1.reshape(1, -1, 1, 1)).sum((1, 2, 3)) + b2
+    B = c3 @ bb + b3
+    W[:, :, 1, 1] += sd[p + ".sk.weight"][:, :, 0, 0]
+    B = B + sd[p + ".sk.bias"]
+    return W.astype(np.float32), B.astype(np.float32)
+
+
+class Malli:
+    """SPAN- tai RealPLKSR-malli tilasanakirjasta. Arkkitehtuuri tunnistetaan avaimista."""
+
+    def __init__(self, ops, sd):
+        self.ops = ops
+        if "conv_1.sk.weight" in sd:
+            self._span(sd)
+        elif "feats.1.channel_mixer.0.weight" in sd:
+            self._realplksr(sd)
+        else:
+            raise ValueError("Tuntematon malliarkkitehtuuri")
+
+    # ---------------------------------------------------------- SPAN
+    def _span(self, sd):
+        o = self.ops
+        self.tyyppi = "SPAN"
+        if "no_norm" not in sd:
+            raise ValueError("SPAN-malli normalisoinnilla ei ole tuettu")
+        P = {}
+        nimet = ["conv_1", "conv_2"] + [f"block_{i}.c{j}_r" for i in range(1, 7) for j in (1, 2, 3)]
+        for n in nimet:
+            W, B = _fuse_conv3xc(sd, n)     # tiedoston eval_conv-painot voivat olla vanhentuneita
+            P[n] = (o.param(W), o.param(B))
+        P["conv_cat"] = (o.param(sd["conv_cat.weight"]), o.param(sd["conv_cat.bias"]))
+        P["up"] = (o.param(sd["upsampler.0.weight"]), o.param(sd["upsampler.0.bias"]))
+        self.skaala = int(round(math.sqrt(sd["upsampler.0.weight"].shape[0] / 3)))
+        self.P = P
+
+    def _span_fwd(self, x):
+        o, P = self.ops, self.P
+
+        def c(n, t, pad=1):
+            return o.conv2d(t, P[n][0], P[n][1], pad)
+
+        feat = c("conv_1", x)
+        b = feat
+        talteen = {}
+        for i in range(1, 7):
+            p = f"block_{i}"
+            # Alkuperäisessä SiLU(inplace=True) muuttaa c1-tuloksen paikallaan, joten
+            # talteen otettava välitulos on aktivoitu (tarkistettu mallin ONNX-viennistä).
+            o1 = o.silu(c(p + ".c1_r", b))
+            o3 = c(p + ".c3_r", o.silu(c(p + ".c2_r", o1)))
+            b = (o3 + b) * (o.sigmoid(o3) - 0.5)
+            if i == 1:
+                talteen["b1"] = b
+            if i == 6:
+                talteen["b5_2"] = o1
+        b6 = c("conv_2", b)
+        out = c("conv_cat", o.cat([feat, b6, talteen["b1"], talteen["b5_2"]]), pad=0)
+        return o.pixel_shuffle(c("up", out), self.skaala)
+
+    # ---------------------------------------------------------- RealPLKSR
+    def _realplksr(self, sd):
+        o = self.ops
+        self.tyyppi = "RealPLKSR"
+        if "to_img.init_pos" in sd or "feats.1.layer_norm.bias" in sd:
+            raise ValueError("RealPLKSR DySample/LayerNorm -versio ei ole tuettu")
+        idx = sorted({int(k.split(".")[1]) for k in sd if k.startswith("feats.")})
+        self.n_lohkot = len([i for i in idx if f"feats.{i}.channel_mixer.0.weight" in sd])
+        viim = idx[-1]
+        self.skaala = int(round(math.sqrt(sd[f"feats.{viim}.weight"].shape[0] / 3)))
+        P = {"alku": (o.param(sd["feats.0.weight"]), o.param(sd["feats.0.bias"])),
+             "loppu": (o.param(sd[f"feats.{viim}.weight"]), o.param(sd[f"feats.{viim}.bias"]))}
+        self.lohkot = []
+        for i in range(1, self.n_lohkot + 1):
+            p = f"feats.{i}."
+            L = {k: (o.param(sd[p + k + ".weight"]), o.param(sd[p + k + ".bias"]))
+                 for k in ("channel_mixer.0", "channel_mixer.2", "lk.conv", "attn.f.0", "refine", "norm")}
+            self.lohkot.append(L)
+        self.pdim = sd["feats.1.lk.conv.weight"].shape[0]
+        self.lk_pad = sd["feats.1.lk.conv.weight"].shape[2] // 2
+        self.ryhmat = 4
+        self.P = P
+
+    def _plksr_fwd(self, x):
+        o, P = self.ops, self.P
+        f = o.conv2d(x, *P["alku"], 1)
+        for L in self.lohkot:
+            t = o.conv2d(f, *L["channel_mixer.0"], 1)
+            t = o.mish(t)
+            t = o.conv2d(t, *L["channel_mixer.2"], 1)
+            t = o.cat([o.conv2d(t[:, :self.pdim], *L["lk.conv"], self.lk_pad), t[:, self.pdim:]])
+            t = t * o.sigmoid(o.conv2d(t, *L["attn.f.0"], 1))
+            t = o.conv2d(t, *L["refine"], 0)
+            t = o.group_norm(t, self.ryhmat, *L["norm"])
+            f = t + f
+        f = o.conv2d(f, *P["loppu"], 1) + o.repeat_ch(x, self.skaala * self.skaala)
+        return o.pixel_shuffle(f, self.skaala)
+
+    def __call__(self, x):
+        return self._span_fwd(x) if self.tyyppi == "SPAN" else self._plksr_fwd(x)
+
+    puoli = False
+
+    def puolita(self):
+        """Muunna painot fp16:ksi (vain torch). GroupNorm lasketaan silti fp32:na."""
+        o = self.ops
+        if not getattr(o, "ht", False):
+            return
+        self.puoli = True
+
+        def h(t):
+            return (t[0].half(), t[1].half())
+        if self.tyyppi == "SPAN":
+            self.P = {k: h(v) for k, v in self.P.items()}
+        else:
+            self.P = {k: h(v) for k, v in self.P.items()}
+            self.lohkot = [{k: (v if k == "norm" else h(v)) for k, v in L.items()} for L in self.lohkot]
+
+
+# ============================================================== käsittelyketju
+
+# BT.601 (SD) ja BT.709 luma-kertoimet
+KR_KB = {"bt601": (0.299, 0.114), "bt709": (0.2126, 0.0722)}
+
+
+class Ketju:
+    """Yhden asetuksen koko käsittelyketju lähteen RGB-kuvasta valmiiksi YUV 4:2:0 10-bit -kuvaksi.
+
+    asetus: dict
+      malli        – Malli tai None
+      ai           – AI-tuloksen osuus 0..1 (loput tavallista skaalausta)
+      halo         – halonpoiston voimakkuus 0..1 (0 = pois)
+      halo_r       – halon leveys lähteen pikseleinä (DeHalo_alpha rx/ry)
+      rae          – filmirakeen voimakkuus 0..1
+      rae_koko     – rakeen koko (1080p-kuvan pikseleinä)
+    Lähteen pikseleitä ei venytetä ennen mallia: malli saa alkuperäiset pikselit ja
+    oikea kuvasuhde tehdään loppuskaalauksessa (testattu: terävämpi kuin esivenytys).
+    """
+
+    def __init__(self, ops, h, w, oh, ow, asetus, matriisi="bt601"):
+        self.o = o = ops
+        self.h, self.w, self.oh, self.ow = h, w, oh, ow
+        self.a = dict(asetus)
+        self.malli = self.a.get("malli")
+        self.kr, self.kb = KR_KB[matriisi]
+        s = self.malli.skaala if self.malli else 1
+        self.mh, self.mw = h * s, w * s
+        # perinteinen skaalaus lähteestä mallin resoluutioon (AI-osuuden sekoitusta varten)
+        if self.malli and float(self.a.get("ai", 1.0)) < 1.0:
+            self.Wy_m = o.param(skaalausmatriisi(h, self.mh, "catmullrom"))
+            self.Wx_m = o.param(skaalausmatriisi(w, self.mw, "catmullrom"))
+        # loppuskaalaus näytön kokoon
+        self.Wy_o = o.param(skaalausmatriisi(self.mh, oh, "catmullrom" if oh >= self.mh else "mitchell"))
+        self.Wx_o = o.param(skaalausmatriisi(self.mw, ow, "catmullrom" if ow >= self.mw else "mitchell"))
+        # halonpoisto
+        if self.a.get("halo", 0) > 0:
+            r = float(self.a.get("halo_r", 2.0))
+            hh, hw = max(8, int(round(h / r / 4)) * 4), max(8, int(round(w / r / 4)) * 4)
+            self.Wy_hd = o.param(skaalausmatriisi(h, hh, "mitchell"))
+            self.Wx_hd = o.param(skaalausmatriisi(w, hw, "mitchell"))
+            self.Wy_hu = o.param(skaalausmatriisi(hh, h, "bspline"))
+            self.Wx_hu = o.param(skaalausmatriisi(hw, w, "bspline"))
+        # filmirae: gaussinen sumennus antaa rakeelle koon
+        if self.a.get("rae", 0) > 0:
+            sigma = float(self.a.get("rae_koko", 0.7)) * oh / 1080.0
+            r = max(1, int(math.ceil(sigma * 2.5)))
+            g = np.exp(-0.5 * (np.arange(-r, r + 1) / max(sigma, 1e-3)) ** 2)
+            g /= g.sum()
+            self.rae_norm = float(1.0 / (g ** 2).sum())   # sumennetun kohinan keskihajonta takaisin 1:ksi
+            self.Gy = o.param(g.reshape(1, 1, -1, 1).astype(np.float32))
+            self.Gx = o.param(g.reshape(1, 1, 1, -1).astype(np.float32))
+            self.rae_pad = r
+        # YUV 4:2:0
+        self.Cy, self.Cx = [o.param(m) for m in alinaytteistys_matriisit(oh, ow)]
+
+    # ---------------------------------------------------------- vaiheet
+    def luma(self, x, kr=None, kb=None):
+        kr = self.kr if kr is None else kr
+        kb = self.kb if kb is None else kb
+        return x[:, 0:1] * kr + x[:, 1:2] * (1 - kr - kb) + x[:, 2:3] * kb
+
+    def halonpoisto(self, x):
+        """DeHalo_alpha (Didée) lumalle. Muutos lisätään kaikkiin RGB-kanaviin, joten sävy säilyy."""
+        o, a = self.o, self.a
+        y = self.luma(x)
+        halos = o.matresize(o.matresize(y, self.Wy_hd, self.Wx_hd), self.Wy_hu, self.Wx_hu)
+        are = o.max3(y) - o.min3(y)
+        ugly = o.max3(halos) - o.min3(halos)
+        lows, highs = float(a.get("halo_low", 50)), float(a.get("halo_high", 50))
+        so = ((are - ugly) / (are + 1e-6) * 255.0 - lows) * ((are * 255.0 + 256.0) / 512.0 + highs / 100.0)
+        so = o.clamp(so, 0.0, 255.0) / 255.0
+        lets = halos + (y - halos) * so
+        remove = o.clamp(y, o.min3(lets), o.max3(lets))
+        d = y - remove
+        vahvuus = float(a.get("halo", 1.0))
+        tumma = float(a.get("halo_tumma", 0.5)) * vahvuus
+        uusi = y - o.where(y < remove, d * tumma, d * vahvuus)
+        return x + (uusi - y)
+
+    def rae(self, rgb, ensimmainen):
+        """Filmirae lumaan. Jokaisella kuvalla oma siemen (kuvan numero), joten tulos on sama
+        vaikka käsittely keskeytettäisiin ja jatkettaisiin."""
+        o, a = self.o, self.a
+        n = rgb.shape[0]
+        z = o.cat_n([o.randn((1, 1, self.oh, self.ow), 7919 + ensimmainen + i) for i in range(n)])
+        p = self.rae_pad
+        z = o.conv2d(o.conv2d(o.pad_reflect(z, p), self.Gy), self.Gx) * self.rae_norm
+        y = o.clamp(self.luma(rgb, 0.2126, 0.0722), 0.0, 1.0)
+        # eniten rakeita keskisävyissä, vähemmän syvissä varjoissa ja kirkkaissa kohdissa
+        paino = 0.35 + 0.65 * o.clamp(4.0 * y * (1.0 - y), 0.0, 1.0)
+        amp = float(a.get("rae", 0)) * 3.0 / 255.0
+        return rgb + z * (paino * amp)
+
+    def yuv420p10(self, rgb):
+        """RGB 0..1 -> rajattu BT.709 YUV 4:2:0, 10 bittiä. Palauttaa (Y, U, V) int16-taulukot."""
+        o = self.o
+        rgb = o.clamp(rgb, 0.0, 1.0)
+        kr, kb = 0.2126, 0.0722
+        y = self.luma(rgb, kr, kb)
+        cb = o.matresize((rgb[:, 2:3] - y) / (2 * (1 - kb)), self.Cy, self.Cx)
+        cr = o.matresize((rgb[:, 0:1] - y) / (2 * (1 - kr)), self.Cy, self.Cx)
+        return (o.to_int16(64.0 + 876.0 * y), o.to_int16(512.0 + 896.0 * cb),
+                o.to_int16(512.0 + 896.0 * cr))
+
+    def rgb_lopullinen(self, x, ensimmainen=0):
+        """Lähteen RGB (n,3,h,w) 0..1 -> näytön kokoinen RGB (ennen YUV-muunnosta)."""
+        o, a = self.o, self.a
+        if a.get("halo", 0) > 0:
+            x = self.halonpoisto(x)
+        if self.malli is not None:
+            xm = o.clamp(x, 0.0, 1.0)
+            ai = o.float(self.malli(o.half(xm) if self.malli.puoli else xm))
+            osuus = float(a.get("ai", 1.0))
+            if osuus < 1.0:
+                perus = o.matresize(x, self.Wy_m, self.Wx_m)
+                ai = perus + (ai - perus) * osuus
+            x = ai
+        y = o.matresize(x, self.Wy_o, self.Wx_o)
+        if a.get("rae", 0) > 0:
+            y = self.rae(y, ensimmainen)
+        return y
+
+    def __call__(self, x, ensimmainen=0):
+        return self.yuv420p10(self.rgb_lopullinen(x, ensimmainen))

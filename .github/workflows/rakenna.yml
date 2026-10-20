@@ -1,0 +1,46 @@
+name: Rakenna asennusohjelma
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kokoa Python-ympäristö ja sovellus
+        shell: pwsh
+        run: ./installer/rakenna.ps1
+
+      - name: Savutesti
+        shell: pwsh
+        run: ./build/python/python.exe installer/savutesti.py
+
+      - name: Rakenna Setup.exe (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DVersio=$env:VERSIO" installer/pixeliremaster.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC epäonnistui" }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PixeliRemaster-${{ env.VERSIO }}-Setup
+          path: dist/*.exe
+
+      - name: Julkaise
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          body_path: installer/julkaisutiedot.md

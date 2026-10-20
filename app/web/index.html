@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="pixeli-avain" content="__AVAIN__">
+<title>PixeliRemaster</title>
+<link rel="icon" href="/web/pixeli-64.png">
+<link rel="stylesheet" href="/web/app.css">
+</head>
+<body>
+<div class="palkit" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+<header class="ylapalkki">
+  <div class="merkki"><img src="/web/pixeli.svg" alt="" width="28" height="28"><span>PixeliRemaster</span></div>
+  <div class="ylapalkki-oikea">
+    <button class="painike haamu" id="asetukset-nappi" data-t="asetukset.avaa"></button>
+  </div>
+</header>
+
+<!-- Ensimmäinen käynnistys -->
+<main id="asennus" class="asennus" hidden>
+  <div class="asennus-sisalto">
+    <h1 data-t="asennus.otsikko"></h1>
+    <p class="johdanto" data-t="asennus.johdanto"></p>
+    <ol class="vaiheet" id="asennus-vaiheet"></ol>
+    <div id="asennus-viesti" class="viesti" hidden></div>
+    <div class="toiminnot">
+      <button class="painike ensisijainen" id="asennus-aloita"></button>
+      <button class="painike haamu" id="asennus-loki" data-t="yleinen.avaa_loki"></button>
+    </div>
+  </div>
+</main>
+
+<!-- Pääikkuna -->
+<div id="paa" class="paa" hidden>
+  <aside class="jono" aria-labelledby="jono-otsikko">
+    <div class="jono-otsikko"><h2 id="jono-otsikko" data-t="jono.otsikko"></h2>
+      <button class="painike pieni haamu" id="tyhjenna" data-t="jono.tyhjenna" hidden></button></div>
+    <ul id="jono-lista" class="jono-lista"></ul>
+    <div class="jono-ala">
+      <button class="painike toissijainen leveä" id="lisaa" data-t="jono.lisaa"></button>
+      <p class="vihje" id="pudota-vihje" data-t="jono.pudota_vihje"></p>
+    </div>
+  </aside>
+
+  <section class="tyo" id="tyo" aria-live="polite"></section>
+
+  <footer class="alapalkki">
+    <div id="jono-yhteenveto" class="yhteenveto"></div>
+    <label class="valinta"><input type="checkbox" id="sammuta"><span data-t="jono.sammuta"></span></label>
+    <button class="painike ensisijainen" id="jono-nappi"></button>
+  </footer>
+</div>
+
+<div id="pudotus" class="pudotus" hidden><div><strong data-t="pudotus.otsikko"></strong><span data-t="pudotus.teksti"></span></div></div>
+
+<dialog id="asetukset" class="dialogi">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 data-t="asetukset.otsikko"></h2>
+    <fieldset>
+      <legend data-t="asetukset.kohde"></legend>
+      <p class="selite" data-t="asetukset.kohde_selite"></p>
+      <div class="vaihtoehdot" id="kohde-vaihtoehdot"></div>
+    </fieldset>
+    <fieldset>
+      <legend data-t="asetukset.tallennus"></legend>
+      <label class="radio"><input type="radio" name="tallennus" value="viereen"><span data-t="asetukset.tallennus_viereen"></span></label>
+      <label class="radio"><input type="radio" name="tallennus" value="kansio"><span data-t="asetukset.tallennus_kansioon"></span></label>
+      <div class="kansiorivi"><code id="ulos-kansio"></code><button type="button" class="painike pieni toissijainen" id="valitse-kansio" data-t="asetukset.valitse_kansio"></button></div>
+    </fieldset>
+    <fieldset>
+      <legend data-t="asetukset.kieli"></legend>
+      <label class="radio"><input type="radio" name="kieli" value="auto"><span data-t="asetukset.kieli_auto"></span></label>
+      <label class="radio"><input type="radio" name="kieli" value="fi"><span>Suomi</span></label>
+      <label class="radio"><input type="radio" name="kieli" value="en"><span>English</span></label>
+    </fieldset>
+    <details class="tietoja">
+      <summary data-t="asetukset.tietoja"></summary>
+      <div id="tietoja-sisalto"></div>
+    </details>
+    <div class="toiminnot">
+      <button class="painike haamu" type="button" id="avaa-loki" data-t="yleinen.avaa_loki"></button>
+      <button class="painike ensisijainen" value="ok" data-t="yleinen.sulje"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="liike" class="dialogi leveä">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 id="liike-otsikko"></h2>
+    <video id="liike-video" controls loop muted playsinline></video>
+    <div class="toiminnot"><button class="painike ensisijainen" value="ok" data-t="yleinen.sulje"></button></div>
+  </form>
+</dialog>
+
+<div id="ilmoitus" class="ilmoitus" role="status" hidden></div>
+
+<script src="/web/kaannokset.js"></script>
+<script src="/web/app.js"></script>
+</body>
+</html>
