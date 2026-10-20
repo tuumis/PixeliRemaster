@@ -59,6 +59,12 @@ class Ymparisto:
         with self.lukko:
             self.tila.update({"gpu": gpu, "torch": torch_tila, "ffmpeg": m.ffmpeg_ok(),
                               "itsetesti": it, "tarkistettu": True})
+            # päivityksen jälkeen kaikki on jo ladattu: itsetesti ajetaan uudelle versiolle kysymättä
+            paivitys = (not it and gpu and gpu.get("ajuri_ok") and torch_tila == "ok" and self.tila["ffmpeg"]
+                        and (m.DATA / "itsetesti.json").exists() and not self.tila["testitila"])
+        if paivitys:
+            m.loki("Uusi versio: ajetaan itsetesti")
+            self.aloita_asennus()
 
     @staticmethod
     def _nvidia():
