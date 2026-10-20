@@ -6,10 +6,18 @@ laskevat järkevän tuloksen numpy-referenssillä, ja että palvelin vastaa.
 import json
 import os
 import sys
+import traceback
 import tempfile
 import urllib.request
 from pathlib import Path
 
+def _virhe(tyyppi, arvo, tb):
+    rivit = "".join(traceback.format_exception(tyyppi, arvo, tb)).strip().replace("\n", "%0A")
+    print(f"::error title=savutesti::{rivit}", flush=True)
+    sys.__excepthook__(tyyppi, arvo, tb)
+
+
+sys.excepthook = _virhe
 juuri = Path(__file__).resolve().parent.parent
 app = juuri / "build" / "app" if (juuri / "build" / "app").exists() else juuri / "app"
 sys.path.insert(0, str(app))

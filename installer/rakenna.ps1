@@ -4,6 +4,13 @@
 #   build\app      sovellus, käyttöliittymä ja AI-mallit
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+trap {
+  # virhe GitHubin merkinnäksi, jotta sen näkee ajon yhteenvedosta
+  $viesti = "$($_.Exception.Message) (rivi $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim()))"
+  Write-Host "::error title=rakenna.ps1::$viesti"
+  exit 1
+}
+function Vaihe($teksti) { Write-Host "::notice title=Vaihe::$teksti"; Write-Host $teksti }
 
 $juuri = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $juuri "build"
@@ -12,7 +19,7 @@ $pyver = "3.12.10"
 if (Test-Path $build) { Remove-Item -Recurse -Force $build }
 New-Item -ItemType Directory -Force (Join-Path $build "python") | Out-Null
 
-Write-Host "Ladataan Python $pyver (embeddable)"
+Vaihe "Ladataan Python $pyver (embeddable)"
 $zip = Join-Path $build "python.zip"
 Invoke-WebRequest "https://www.python.org/ftp/python/$pyver/python-$pyver-embed-amd64.zip" -OutFile $zip
 Expand-Archive $zip (Join-Path $build "python")
@@ -23,7 +30,7 @@ $pth = Get-ChildItem (Join-Path $build "python\python3*._pth") | Select-Object -
 $stdzip = (Get-ChildItem (Join-Path $build "python\python3*.zip") | Select-Object -First 1).Name
 Set-Content $pth.FullName -Value @($stdzip, ".", "Lib\site-packages", "..\app", "import site") -Encoding ascii
 
-Write-Host "Asennetaan pip, numpy ja pywebview"
+Vaihe "Asennetaan pip, numpy ja pywebview"
 $py = Join-Path $build "python\python.exe"
 Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile (Join-Path $build "get-pip.py")
 & $py (Join-Path $build "get-pip.py") --no-warn-script-location
@@ -31,10 +38,11 @@ if ($LASTEXITCODE -ne 0) { throw "get-pip epäonnistui" }
 Remove-Item (Join-Path $build "get-pip.py")
 & $py -m pip install --no-warn-script-location --disable-pip-version-check "numpy==2.2.6" "pywebview==5.4"
 if ($LASTEXITCODE -ne 0) { throw "pip install epäonnistui" }
-& $py -c "import numpy, webview, clr_loader; print('numpy', numpy.__version__, 'pywebview', webview.__version__ if hasattr(webview, '__version__') else '?')"
+$tuonti = & $py -c "import numpy, webview; print('numpy', numpy.__version__)" 2>&1
+Vaihe "Kirjastot: $tuonti"
 if ($LASTEXITCODE -ne 0) { throw "kirjastojen tuonti epäonnistui" }
 
-Write-Host "Kopioidaan sovellus"
+Vaihe "Kopioidaan sovellus"
 $app = Join-Path $build "app"
 Copy-Item -Recurse (Join-Path $juuri "app") $app
 Get-ChildItem $app -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
