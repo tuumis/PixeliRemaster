@@ -45,7 +45,7 @@ function Pip([string[]]$paketit, [string[]]$lisa = @()) {
 }
 # Upotettu Python ohittaa PYTHONPATHin (._pth), joten pipin eristetty rakennus ei toimi:
 # lähdekoodipaketit (esim. proxy_tools) rakennetaan ilman eristystä.
-Pip @("setuptools", "wheel")
+Pip @("setuptools<82", "wheel")   # PyTorch vaatii setuptools<82; päivitys ei saa korvata sitä uudemmalla
 Pip @("numpy==2.2.6", "pywebview==5.4") @("--no-build-isolation")
 $tuonti = & $py -c "import numpy, webview; print('numpy', numpy.__version__)" 2>&1
 Vaihe "Kirjastot: $tuonti"

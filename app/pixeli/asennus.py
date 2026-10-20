@@ -89,13 +89,20 @@ class Ymparisto:
     def _torch_tila():
         if os.environ.get("PIXELI_LAITE") == "numpy":
             return "ok"
+        # Jo ladattua PyTorchia ei saa ladata uudelleen samaan prosessiin (C-laajennus rekisteröityy
+        # vain kerran), joten onnistunut tuonti käytetään sellaisenaan.
+        ladattu = sys.modules.get("torch")
+        if ladattu is not None and hasattr(ladattu, "cuda"):
+            return "ok" if ladattu.cuda.is_available() else "ei_cudaa"
         try:
             importlib.invalidate_caches()
             for k in [k for k in sys.modules if k == "torch" or k.startswith("torch.")]:
-                del sys.modules[k]
+                del sys.modules[k]          # epäonnistuneen tuonnin jäänteet pois
             import torch
             return "ok" if torch.cuda.is_available() else "ei_cudaa"
         except Exception:  # noqa: BLE001
+            if any(p.name.startswith("torch-") for p in (Path(sys.prefix) / "Lib" / "site-packages").glob("torch-*")):
+                m.loki(f"PyTorch on asennettu, mutta sen lataus epäonnistui: {traceback.format_exc()}")
             return "puuttuu"
 
     def valmis(self):
