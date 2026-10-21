@@ -41,6 +41,8 @@ o = kuva.NumpyOps()
 x = m.testikuva(32, 40)
 for n, cfg in m.ASETUKSET.items():
     a = dict(cfg)
+    if a.get("malli") == "monikuva":
+        continue                          # ladattava lisämalli: testataan torchtestissä
     if a.get("malli"):
         a["malli"] = kuva.Malli(o, kuva.lataa_pth(m.MALLIT / m.MALLITIEDOSTOT[a["malli"]]))
     k = kuva.Ketju(o, 32, 40, 96, 120, a)
