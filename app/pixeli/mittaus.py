@@ -95,13 +95,96 @@ def mittaa(kuvat):
             "teravyys": round(float(np.median(t)), 3)}
 
 
+def mittaa_yksi(a):
+    """Yhden kuvan mittaukset tai None (musta, häivytys tai liian pieni kuva ei kerro laadusta)."""
+    a = np.asarray(a)
+    a = a[0] if a.ndim == 4 else a
+    y = _luma(a[::2, ::2])
+    if y.shape[0] < 16 or y.shape[1] < 16 or y.mean() < 16 or y.std() < 5:
+        return None
+    return mittaa([a])
+
+
+def siivoustarve(mitta):
+    """Kuinka paljon kohinan- ja pakkausjälkien poistoa lähde tarvitsisi (sigma 0..)."""
+    return max(0.0, mitta["kohina"] - 1.2) + max(0.0, mitta["lohkot"] - 1.15) * 10.0
+
+
+def vaikeus(mitta):
+    """Lajitteluarvo esikatselun "vaikeimman kohdan" valintaan: pakkausjäljet, kohina ja pehmeys."""
+    return siivoustarve(mitta) + max(0.0, 0.45 - mitta["teravyys"]) * 10.0
+
+
+def vaihtelee(mitat):
+    """Vaihteleeko lähteen laatu niin paljon, että eri kohdat tarvitsisivat selvästi eri säädöt."""
+    if len(mitat) < 4:
+        return False
+    tarve = np.array([min(4.0, siivoustarve(x)) for x in mitat])
+    ter = np.array([x["teravyys"] for x in mitat])
+    return bool(tarve.max() - np.median(tarve) > 2.0 or np.median(ter) - ter.min() > 0.2)
+
+
+def _mediaani3(a):
+    """3x3-mediaani jokaiselle kanavalle (numpy)."""
+    h, w = a.shape[:2]
+    p = np.pad(a, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    return np.median(np.stack([p[i:i + h, j:j + w] for i in range(3) for j in range(3)]), axis=0)
+
+
+def piirrospinnat(a, B=8, raja=1.2):
+    """Piirretyn tunnusmerkki: tasaväriset, värikkäät pinnat. Palauttaa (osuus keskisävyisistä
+    lohkoista, tasaisten värikkäiden lohkojen värisävyt asteina)."""
+    a = np.asarray(a)
+    a = a[0] if a.ndim == 4 else a
+    h, w = a.shape[:2]
+    if h * w > 1_000_000:                      # iso kuva: pienennetään (sama mittakaava kuin SD)
+        k = int(math.ceil(math.sqrt(h * w / 500_000)))
+        a = a[:h // k * k, :w // k * k].reshape(h // k, k, w // k, k, 3).mean(axis=(1, 3))
+    f = _mediaani3(a.astype(np.float32))
+    y = 0.299 * f[..., 0] + 0.587 * f[..., 1] + 0.114 * f[..., 2]
+    cb, cr = f[..., 2] - y, f[..., 0] - y
+    h, w = y.shape
+    h8, w8 = h // B * B, w // B * B
+    if h8 < 4 * B or w8 < 4 * B:
+        return 0.0, np.zeros(0)
+
+    def lohkot(z):
+        return z[:h8, :w8].reshape(h8 // B, B, w8 // B, B).transpose(0, 2, 1, 3).reshape(h8 // B, w8 // B, B * B)
+    by, bb, br = lohkot(y), lohkot(cb), lohkot(cr)
+    ka = by.mean(-1)
+    keski = (ka > 35) & (ka < 220)
+    if keski.sum() < 50:
+        return 0.0, np.zeros(0)
+    tasainen = (by.std(-1) < raja) & (bb.std(-1) < raja * 1.5) & (br.std(-1) < raja * 1.5)
+    mb, mr = bb.mean(-1), br.mean(-1)
+    v = tasainen & keski & (np.sqrt(mb ** 2 + mr ** 2) > 25)
+    return float(v.sum() / keski.sum()), np.degrees(np.arctan2(mr[v], mb[v])) % 360
+
+
+def piirretty(kuvat):
+    """Onko video piirrettyä? Tasaväristen värikkäiden pintojen osuus ja niiden värisävyjen kirjo:
+    piirretyissä pintoja on paljon ja monessa sävyssä, luontokuvassa (esim. nurmikko) yhdessä."""
+    osuudet, savyt = [], []
+    for a in kuvat:
+        o, s = piirrospinnat(a)
+        osuudet.append(o)
+        savyt.append(s)
+    if len(osuudet) < 4:
+        return False
+    s = np.concatenate(savyt) if savyt else np.zeros(0)
+    if len(s) < 50:
+        return False
+    jakauma = np.histogram(s, bins=12, range=(0, 360))[0] / len(s)
+    o = np.array(osuudet)
+    return bool(np.median(o) >= 0.10 and (o > 0.08).mean() >= 0.6 and (jakauma >= 0.04).sum() >= 5)
+
+
 def oletukset(mitta, kuva=False):
     """Mittauksiin sovitetut säädöt jokaiselle asetukselle: {"2": {"ai":…, "rae":…, "kohina":…}, …}"""
     kohina, lohkot, ter = mitta["kohina"], mitta["lohkot"], mitta["teravyys"]
     # siivouksen tarve: kohina + selvä lohkoisuus, maltillisesti (sigma enintään 4 ~ kohina 0.2).
     # Vertailuissa (XviD, YouTube-H.264) voimakkaampi siivous vei kasvoista ja kankaista yksityiskohdat.
-    sigma = max(0.0, kohina - 1.2) * 1.0 + max(0.0, lohkot - 1.15) * 10.0
-    sigma = min(4.0, sigma)
+    sigma = min(4.0, siivoustarve(mitta))
     siivous = round(sigma / 20.0 / 0.05) * 0.05
     # hyvin pehmeässä lähteessä malli keksii eniten: tekoälyn osuutta pienennetään hieman
     pehmeys = min(1.0, max(0.0, (0.45 - ter) / 0.2))           # 0 = terävä, 1 = hyvin pehmeä

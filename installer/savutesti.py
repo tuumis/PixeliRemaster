@@ -90,6 +90,32 @@ assert set(ol) == {"2", "3", "4", "5", "6"} and all(0 <= v["kohina"] <= 0.2 for 
 assert set(lisamallit.LUETTELO) and all(t["sha256"] and t["koko"] for t in lisamallit.LUETTELO.values())
 print("kuvat OK, mittaus", mm)
 
+# piirretyn tunnistus: tasavärisiä värikkäitä pintoja monessa sävyssä -> piirretty; luonnollinen kuva ei
+_r = np.random.default_rng(4)
+
+
+def _piirros():
+    a = np.full((240, 320, 3), 200, np.float32)
+    for _ in range(7):
+        y0, x0 = _r.integers(0, 200), _r.integers(0, 280)
+        hh, ww = _r.integers(30, 120, 2)
+        sv = _r.random() * 2 * np.pi
+        a[y0:y0 + hh, x0:x0 + ww] = [128 + 90 * np.cos(sv), 128 + 90 * np.cos(sv - 2.1), 128 + 90 * np.cos(sv + 2.1)]
+        a[y0:y0 + 2, x0:x0 + ww] = 20
+    return np.clip(a + _r.normal(0, 0.6, a.shape), 0, 255).astype(np.uint8)
+
+
+def _luonto():
+    z = np.kron(_r.normal(0, 1, (60, 80, 3)).cumsum(0).cumsum(1), np.ones((4, 4, 1)))
+    z = (z - z.min()) / (z.max() - z.min()) * 180 + 40
+    return np.clip(z + _r.normal(0, 3, z.shape), 0, 255).astype(np.uint8)
+
+
+assert mittaus.piirretty([_piirros() for _ in range(8)]) and not mittaus.piirretty([_luonto() for _ in range(8)])
+_mitat = [{"kohina": 0.3, "lohkot": 1.1, "teravyys": 0.5}] * 6 + [{"kohina": 0.3, "lohkot": 1.6, "teravyys": 0.5}]
+assert mittaus.vaihtelee(_mitat) and not mittaus.vaihtelee(_mitat[:6])
+print("piirretyn ja vaihtelun tunnistus OK")
+
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
 sov = palvelin.Sovellus(jono, ymp)

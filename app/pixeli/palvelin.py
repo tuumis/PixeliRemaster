@@ -108,6 +108,9 @@ class Sovellus:
         if polku == "esikatsele":
             j.esikatsele(d["id"])
             return {}
+        if polku == "kohta":
+            j.kohta(d["id"], d["k"], d["aika"])
+            return {}
         if polku == "alue":
             j.alue(d["id"], d.get("k", 1), d["x"], d["y"])
             return {}

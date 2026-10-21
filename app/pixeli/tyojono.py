@@ -320,6 +320,38 @@ class Jono:
             t["koe"]["siirretaan"] = int(k)
         self._koe_q.put(("alue", tid, (int(k), float(x), float(y))))
 
+    def kohta(self, tid, k, aika):
+        """Videon esikatselukohdan siirto (aikajanalta valittu kohta, sekunteina)."""
+        with self.lukko:
+            t = self._tyo(tid)
+            if t.get("laji") == "kuva" or (t.get("koe") or {}).get("tila") != "valmis":
+                return
+            t["koe"]["siirretaan"] = int(k)
+        self._koe_q.put(("kohta", tid, (int(k), float(aika))))
+
+    def _siirra_kohta(self, tid, k, aika):
+        try:
+            with self.lukko:
+                t = self._tyo(tid)
+                polku, an, geo, wd = Path(t["polku"]), t["analyysi"], t["geo"], self._wd(t)
+                koe = t["koe"]
+            kohdat = m.siirra_kohta(polku, an, geo, wd, self._laite("esikatselu"), k, aika)
+            with self.lukko:
+                if t.get("koe") is koe:
+                    koe["kohdat"] = kohdat
+                    koe["versio"] = int(time.time() * 1000)
+        except KeyError:
+            return
+        except Exception:  # noqa: BLE001
+            m.loki(f"Esikatselukohdan siirto epäonnistui: {traceback.format_exc()}")
+        finally:
+            with self.lukko:
+                try:
+                    self._tyo(tid).get("koe", {}).pop("siirretaan", None)
+                except KeyError:
+                    pass
+        self._tallenna()
+
     def saatokuva(self, tid, asetus, saato, k):
         with self.lukko:
             t = self._tyo(tid)
@@ -622,6 +654,8 @@ class Jono:
                 return self._kasittele_kuva(tid)
             if laji == "alue":
                 return self._siirra_alue(tid, *param)
+            if laji == "kohta":
+                return self._siirra_kohta(tid, *param)
             try:
                 with self.lukko:
                     t = self._tyo(tid)
@@ -647,7 +681,14 @@ class Jono:
                         t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"],
                                     "nopeus": {str(k): v for k, v in tiedot["nopeus"].items()},
                                     "mittaus": tiedot.get("mittaus"), "kuvaus": tiedot.get("kuvaus"),
-                                    "oletukset": tiedot.get("oletukset")}
+                                    "oletukset": tiedot.get("oletukset"), "kohdat": tiedot.get("kohdat"),
+                                    "vaihtelee": tiedot.get("vaihtelee", False),
+                                    "piirretty": tiedot.get("piirretty", False)}
+                        # piirretty tunnistetaan vasta mittauksessa: suositus päivittyy (valinta säilyy)
+                        if tiedot.get("piirretty") and an.get("tyyppi") != "hd":
+                            an["suositus"] = 5
+                            if "piirretty" not in an.setdefault("huomiot", []):
+                                an["huomiot"].append("piirretty")
                         self._paivita_geometria(t)
                 else:
                     asetus, saato = param

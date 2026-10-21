@@ -350,7 +350,7 @@ function faktatHtml(x) {
     rivit.push([t("fakta.kuvasuhde"), suhde + (rajattu ? `, ${t("fakta.palkit")}` : "")]);
     rivit.push([t("fakta.tulos"), `${geo.ow}×${geo.oh}`]);
   }
-  if (x.koe && x.koe.kuvaus) rivit.push([t("fakta.laatu_lahde"), laatuTeksti(x.koe.kuvaus)]);
+  if (x.koe && x.koe.kuvaus) rivit.push([t("fakta.laatu_lahde"), laatuTeksti(x.koe.kuvaus) + (x.koe.vaihtelee ? ` · ${t("laatu.vaihtelee")}` : "")]);
   const huomiot = (an.huomiot || []).map(h => `<p class="huomio">${t("huomio." + h)}</p>`).join("")
     + (x.tila === "hd" ? `<p class="huomio">${t("huomio.hd")}</p>` : "");
   return `<dl class="faktat num">${rivit.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join("")}</dl>${huomiot}`;
@@ -395,7 +395,7 @@ function tyoHtml(x) {
     <div class="tyoalue ${paneeli ? "" : "ilman-paneelia"}">
       <div class="katselu">
         <div class="vertailu ${nk.zoom === "todellinen" ? "zoom" : ""} ${x.koe && x.koe.siirretaan ? "laskee" : ""}" id="vertailu">${vertailuHtml(x)}<div class="lataa-huntu"></div></div>
-        ${x.koe && x.koe.tila === "valmis" ? ohjaimetHtml(x) : ""}
+        ${x.koe && x.koe.tila === "valmis" ? ohjaimetHtml(x) + aikajanaHtml(x) : ""}
       </div>
       ${paneeli}
     </div>`;
@@ -415,13 +415,31 @@ function vertailuHtml(x) {
 function ohjaimetHtml(x) {
   const nk = nakyma(x.id);
   const nappi = (ryhma, arvo, teksti, val) => `<button type="button" data-${ryhma}="${arvo}" aria-pressed="${val === arvo}">${teksti}</button>`;
-  const kohdat = !onKuva(x) ? `<span class="ryhma" role="group" aria-label="${t("vertailu.kohta")}" title="${esc(t("vertailu.kohta"))}">${[1, 2, 3].map(k => nappi("kohta", String(k), String(k), String(nk.kohta))).join("")}</span>` : "";
-  return `<div class="ohjaimet">${kohdat}
+  return `<div class="ohjaimet">
     <span class="ryhma" role="group">${nappi("tila", "jakaja", t("vertailu.jakaja"), nk.tila)}${nappi("tila", "vuoro", t("vertailu.vuorottele"), nk.tila)}</span>
     <span class="ryhma" role="group">${nappi("zoom", "sovita", t("vertailu.sovita"), nk.zoom)}${nappi("zoom", "todellinen", t("vertailu.todellinen"), nk.zoom)}</span>
     <span class="vihje" id="vertailu-vihje">${nk.tila === "vuoro" ? t("vertailu.vihje_vuoro") : t("vertailu.vihje_jakaja")}</span>
     ${onKuva(x) ? "" : `<button type="button" class="painike toissijainen pieni" id="liike-nappi">${t("vertailu.liike")}</button>`}
   </div>`;
+}
+
+function aikaTeksti(s) {
+  s = Math.max(0, Math.round(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+function aikajanaHtml(x) {
+  if (onKuva(x) || !x.koe || !x.koe.kohdat || !(x.analyysi.kesto > 0)) return "";
+  const nk = nakyma(x.id), K = x.analyysi.kesto;
+  // lähekkäiset merkit eri korkeudelle, jotta kaikkia voi napsauttaa
+  const ala = x.koe.kohdat.map((k, i) => x.koe.kohdat.some((m_, j) => j < i && Math.abs(m_.t - k.t) < 0.03 * K));
+  const merkit = x.koe.kohdat.map((k, i) => `<button type="button" class="aj-merkki ${nk.kohta === i + 1 ? "valittu" : ""} ${k.laji} ${ala[i] ? "ala" : ""}"
+      data-kohta="${i + 1}" style="left:${Math.min(100, 100 * k.t / K)}%" aria-pressed="${nk.kohta === i + 1}"
+      title="${esc(t("aikajana.merkki_" + k.laji, {k: i + 1, aika: aikaTeksti(k.t)}))}">${i + 1}</button>`).join("");
+  const valittu = x.koe.kohdat[nk.kohta - 1] || x.koe.kohdat[0];
+  return `<div class="aikajana">
+    <div class="aj-palkki" id="aj-palkki" title="${esc(t("aikajana.ohje", {k: nk.kohta}))}"><i class="aj-osoitin" id="aj-osoitin"></i>${merkit}</div>
+    <p class="selite" id="aj-selite">${t("aikajana.kohta_" + valittu.laji, {k: nk.kohta, aika: aikaTeksti(valittu.t)})} · ${t("aikajana.ohje", {k: nk.kohta})}</p></div>`;
 }
 
 function rajattuEsikatselu(x) {
@@ -654,7 +672,25 @@ function kytkeTyo(x) {
     const r = await api("valinta_kaikkiin", {id}).catch(() => null);
     if (r) { ilmoita(t("kaikkiin.tehty", {n: r.n})); Object.keys(nakymat).forEach(k => { if (k !== id) delete nakymat[k]; }); hae(); }
   });
-  $$("[data-kohta]").forEach(b => b.addEventListener("click", () => { nakyma(id).kohta = Number(b.dataset.kohta); paivitaOhjaimet(id); }));
+  $$("[data-kohta]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    nakyma(id).kohta = Number(b.dataset.kohta); paivitaOhjaimet(id); paivitaAikajana(id);
+  }));
+  const aj = $("#aj-palkki");
+  if (aj) {
+    const osuus = e => { const r = aj.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
+    aj.addEventListener("mousemove", e => {
+      const xx = TILA.jono.tyot.find(y => y.id === id); if (!xx) return;
+      const o = $("#aj-osoitin"); o.style.left = (100 * osuus(e)) + "%"; o.dataset.aika = aikaTeksti(osuus(e) * xx.analyysi.kesto);
+    });
+    aj.addEventListener("click", e => {
+      const xx = TILA.jono.tyot.find(y => y.id === id); if (!xx || !xx.koe || xx.koe.siirretaan) return;
+      const nk = nakyma(id); nk.saatoUrl = {};
+      xx.koe.siirretaan = nk.kohta;
+      $("#vertailu")?.classList.add("laskee");
+      api("kohta", {id, k: nk.kohta, aika: osuus(e) * xx.analyysi.kesto}).then(hae).catch(() => {});
+    });
+  }
   $$("[data-tila]").forEach(b => b.addEventListener("click", () => { const nk = nakyma(id); nk.tila = b.dataset.tila; nk.oikea = true; paivitaOhjaimet(id); }));
   $$("[data-zoom]").forEach(b => b.addEventListener("click", () => { nakyma(id).zoom = b.dataset.zoom; $("#vertailu").classList.toggle("zoom", b.dataset.zoom === "todellinen"); paivitaOhjaimet(id); }));
   if (vertailuSeuraaja) vertailuSeuraaja.disconnect();
@@ -700,6 +736,13 @@ function kytkeTyo(x) {
     st.addEventListener("pointerup", () => { veto = false; });
     paivitaKuvat(x); paivitaNayttamo(x);
   }
+}
+function paivitaAikajana(id) {
+  const x = TILA.jono.tyot.find(y => y.id === id); if (!x || !x.koe || !x.koe.kohdat) return;
+  const nk = nakyma(id), k = x.koe.kohdat[nk.kohta - 1]; if (!k) return;
+  $$(".aj-merkki").forEach(b => { const v = Number(b.dataset.kohta) === nk.kohta; b.classList.toggle("valittu", v); b.setAttribute("aria-pressed", String(v)); });
+  const s = $("#aj-selite"); if (s) s.textContent = `${t("aikajana.kohta_" + k.laji, {k: nk.kohta, aika: aikaTeksti(k.t)})} · ${t("aikajana.ohje", {k: nk.kohta})}`;
+  const p = $("#aj-palkki"); if (p) p.title = t("aikajana.ohje", {k: nk.kohta});
 }
 function paivitaOhjaimet(id) {
   const x = TILA.jono.tyot.find(y => y.id === id); if (!x) return;

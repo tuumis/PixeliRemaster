@@ -1,3 +1,6 @@
+**Uutta 1.5.0:** tarkempi videoanalyysi. Laatu mitataan 16 kohdasta koko videon matkalta, ja säädöt sovitetaan niiden mediaaniin. Piirretyt tunnistetaan automaattisesti. Esikatselun kolmas kohta on videon vaikein kohta, ja ohjelma kertoo, jos laatu vaihtelee kohtauksittain. Esikatselukohtia voi siirtää aikajanalta mihin tahansa kohtaukseen.
+**New in 1.5.0:** more thorough video analysis. Quality is measured at 16 points across the whole video and the settings are tuned to their median. Animation is detected automatically. The third preview point is the hardest spot in the video, and the program tells you if quality varies between scenes. Preview points can be moved anywhere on the timeline.
+
 **Korjattu 1.4.1:** esikatselussa saattoi näkyä toisen kuvan säädetty versio, jos tiedostoa vaihtoi ennen kuin esikatselu valmistui. Päivityksen jälkeen vanhentuneet esikatselut lasketaan uudelleen vasta, kun tiedoston avaa.
 **Fixed in 1.4.1:** the preview could show another image's adjusted version when switching files before the preview was ready. After an update, outdated previews are recalculated only when the file is opened.
 

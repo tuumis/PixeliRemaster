@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.4.1"
+VERSIO = "1.5.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -1034,39 +1034,73 @@ def kuvasuodin(an, geo):
     return ",".join(suodin)
 
 
-KOE_KOHDAT = (0.22, 0.5, 0.78)
+KOE_KOHDAT = (0.25, 0.6)          # esikatselun tasavälein valitut kohdat (osuus kestosta); 3. = vaikein kohta
+MITTAUS_NAYTTEET = 16             # laadun mittaus: kuvia tasaisesti koko videon matkalta
+
+
+def _pura_kuvat(src, an, geo, t, maara):
+    """Purkaa `maara` kuvaa kohdasta t (sekunteina) lomituksen purun ja rajauksen jälkeen."""
+    x, y, cw, ch = geo["rajaus"]
+    R = Fraction(an["R"])
+    r = subprocess.run([ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
+                        "-ss", f"{max(0.0, t):.3f}", "-i", str(src), "-map", "0:v:0",
+                        "-an", "-sn", "-dn", "-vf", kuvasuodin(an, geo), "-fps_mode", "cfr",
+                        "-r", f"{R.numerator}/{R.denominator}", "-frames:v", str(maara),
+                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True,
+                       creationflags=PIILOTA)
+    koko = cw * ch * 3
+    n_ = len(r.stdout) // koko
+    return np.frombuffer(r.stdout[:n_ * koko], np.uint8).reshape(-1, ch, cw, 3)
+
+
+def mittausnaytteet(src, an, geo, maara=MITTAUS_NAYTTEET):
+    """[(aika_s, kuva)] tasaisesti koko videon matkalta (alku- ja lopputekstit jäävät väliin)."""
+    from concurrent.futures import ThreadPoolExecutor
+    kesto = float(an.get("kesto") or 0)
+    ajat = [kesto * (0.04 + 0.92 * i / (maara - 1)) for i in range(maara)] if kesto > 20 else [0.0]
+
+    def yksi(t):
+        k = _pura_kuvat(src, an, geo, t, 2)          # 2 kuvaa: lomituksen purku tarvitsee naapurin
+        return (t, k[-1]) if len(k) else None
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        tulos = [r for r in ex.map(yksi, ajat) if r is not None]
+    if not tulos:
+        raise RuntimeError("purku_epaonnistui")
+    return tulos
+
+
+def esikatselukohdat(src, an, geo, kd):
+    """Esikatselukohtien ajat sekunteina: käyttäjän siirtämät, muuten mittauksen valitsemat."""
+    oma = lue_json(kd / "kohdat.json")
+    if oma and len(oma.get("ajat", [])) == 3:
+        return [float(t) for t in oma["ajat"]]
+    mt = lue_json(kd / "mittaus.json") or {}
+    if mt.get("v") == 2 and mt.get("kohdat"):
+        return [float(t) for t in mt["kohdat"]]
+    kesto = float(an.get("kesto") or 0)
+    return [kesto * f for f in KOE_KOHDAT] + [kesto * 0.85]
 
 
 def lahdekuvat(src, an, geo, kd):
     """Purkaa kolme lähdekuvaa (lomituksen purun ja rajauksen jälkeen) esikatselua varten. Jokaisen
     ympäriltä tallennetaan myös lyhyt kuvasarja monikuvamallia varten (jakso_i.npy)."""
     from .vsr import KONTEKSTI
-    x, y, cw, ch = geo["rajaus"]
     R = Fraction(an["R"])
-    koko = cw * ch * 3
     kuvat = []
-    for i, f in enumerate(KOE_KOHDAT, 1):
+    for i, t0 in enumerate(esikatselukohdat(src, an, geo, kd), 1):
         p = kd / f"lahde_{i}.npy"
         if not p.exists():
-            data, k = b"", 0
+            jakso, k = np.zeros((0,)), 0
             # säiliön kesto voi olla videota pidempi (esim. tekstitykset), joten yritetään aiemmin
-            for t in (an["kesto"] * f, an["kesto"] * f * 0.5, 0.0):
+            for t in (t0, t0 * 0.5, 0.0):
                 t = max(0.0, t)
                 alku = max(0.0, t - KONTEKSTI / float(R))
-                r = subprocess.run([ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
-                                    "-ss", f"{alku:.3f}", "-i", str(src), "-map", "0:v:0",
-                                    "-an", "-sn", "-dn", "-vf", kuvasuodin(an, geo), "-fps_mode", "cfr",
-                                    "-r", f"{R.numerator}/{R.denominator}", "-frames:v", str(2 * KONTEKSTI + 1),
-                                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True,
-                                   creationflags=PIILOTA)
-                data = r.stdout
-                n_ = len(data) // koko
-                if n_ >= 1:
-                    k = min(n_ - 1, int(round((t - alku) * float(R))))
+                jakso = _pura_kuvat(src, an, geo, alku, 2 * KONTEKSTI + 1)
+                if len(jakso):
+                    k = min(len(jakso) - 1, int(round((t - alku) * float(R))))
                     break
-            if len(data) < koko:
+            if not len(jakso):
                 raise RuntimeError("purku_epaonnistui")
-            jakso = np.frombuffer(data[:(len(data) // koko) * koko], np.uint8).reshape(-1, ch, cw, 3)
             np.save(kd / f"jakso_{i}.npy", jakso)
             kirjoita_json(kd / f"jakso_{i}.json", {"k": k})
             np.save(p, jakso[k:k + 1])
@@ -1093,15 +1127,32 @@ def koe_tunniste(geo):
 
 
 def mittaa_tiedosto(src, an, geo, wd):
-    """Lähteen laadun mittaus ja siihen sovitetut säädöt (välimuistissa esikatselun kansiossa)."""
+    """Lähteen laadun mittaus ja siihen sovitetut säädöt (välimuistissa esikatselun kansiossa).
+    Mitataan 16 kuvaa koko videon matkalta (mediaani), tunnistetaan piirretty ja laadun vaihtelu
+    ja valitaan esikatseluun kaksi tasavälistä kohtaa ja vaikein kohta."""
     from . import mittaus
     kd = wd / f"koe_{koe_tunniste(geo)}"
     kd.mkdir(parents=True, exist_ok=True)
     vanha = lue_json(kd / "mittaus.json")
-    if vanha and vanha.get("v") == 1:
+    if vanha and vanha.get("v") == 2:
         return vanha
-    mm = mittaus.mittaa(lahdekuvat(src, an, geo, kd))
-    d = {"v": 1, "mittaus": mm, "kuvaus": mittaus.kuvaus(mm), "oletukset": mittaus.oletukset(mm)}
+    naytteet = mittausnaytteet(src, an, geo)
+    mitat = [(t, mittaus.mittaa_yksi(k)) for t, k in naytteet]
+    mitat = [(t, x) for t, x in mitat if x] or [(naytteet[len(naytteet) // 2][0],
+                                                  mittaus.mittaa([naytteet[len(naytteet) // 2][1]]))]
+    mm = {k: round(float(np.median([x[k] for _, x in mitat])), 3) for k in ("kohina", "lohkot", "teravyys")}
+    kesto = float(an.get("kesto") or 0)
+    # vaikein kohta, joka ei osu tasavälisten kohtien päälle (muuten esikatselu näyttäisi saman kohtauksen)
+    tasaiset = [kesto * f for f in KOE_KOHDAT]
+    jarjestys = sorted(mitat, key=lambda tx: -mittaus.vaikeus(tx[1]))
+    vaikein_t = next((t for t, _ in jarjestys if all(abs(t - u) >= 0.08 * kesto for u in tasaiset)),
+                     jarjestys[0][0])
+    d = {"v": 2, "mittaus": mm, "kuvaus": mittaus.kuvaus(mm), "oletukset": mittaus.oletukset(mm),
+         "naytteet": [{"t": round(t, 2), **x} for t, x in mitat],
+         "vaihtelee": mittaus.vaihtelee([x for _, x in mitat]),
+         "piirretty": mittaus.piirretty([k for _, k in naytteet]),
+         "vaikein": round(vaikein_t, 2),
+         "kohdat": [round(kesto * f, 2) for f in KOE_KOHDAT] + [round(vaikein_t, 2)]}
     kirjoita_json(kd / "mittaus.json", d)
     return d
 
@@ -1112,8 +1163,8 @@ def koekuvat(src, an, geo, wd, L, edistys=None, peruuta=None):
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
     kd.mkdir(parents=True, exist_ok=True)
-    kuvat = lahdekuvat(src, an, geo, kd)
     mt = mittaa_tiedosto(src, an, geo, wd)
+    kuvat = lahdekuvat(src, an, geo, kd)
     ol = mt["oletukset"]
     nopeus = {}
     vaiheet = len(ASETUKSET) * len(kuvat)
@@ -1142,17 +1193,61 @@ def koekuvat(src, an, geo, wd, L, edistys=None, peruuta=None):
         mitattu = min(ajat[1:]) if len(ajat) > 1 else ajat[0]
         nopeus[n] = round(1.0 / max(mitattu, 1e-4), 2)
     tiedot = {"tunniste": tun, "nopeus": nopeus, "aika": time.time(), "mittaus": mt["mittaus"],
-              "kuvaus": mt["kuvaus"], "oletukset": ol}
+              "kuvaus": mt["kuvaus"], "oletukset": ol, "vaihtelee": mt.get("vaihtelee", False),
+              "piirretty": mt.get("piirretty", False), "kohdat": kohtatiedot(src, an, geo, kd)}
     kirjoita_json(kd / "koe.json", tiedot)
     return tiedot
+
+
+def kohtatiedot(src, an, geo, kd):
+    """Esikatselukohdat käyttöliittymälle: [{"t": s, "laji": "tasainen" | "vaikein" | "oma"}]."""
+    ajat = esikatselukohdat(src, an, geo, kd)
+    oma = (lue_json(kd / "kohdat.json") or {}).get("omat", [])
+    return [{"t": round(t, 2), "laji": "oma" if i in oma else ("vaikein" if i == 3 else "tasainen")}
+            for i, t in enumerate(ajat, 1)]
+
+
+def siirra_kohta(src, an, geo, wd, L, k, aika, edistys=None):
+    """Siirtää videon esikatselukohdan k aikaan `aika` (s) ja laskee sen vertailukuvat kaikilla
+    asetuksilla. Palauttaa päivitetyt kohtatiedot."""
+    tun = koe_tunniste(geo)
+    kd = wd / f"koe_{tun}"
+    mt = mittaa_tiedosto(src, an, geo, wd)
+    ajat = esikatselukohdat(src, an, geo, kd)
+    k = max(1, min(3, int(k)))
+    kesto = float(an.get("kesto") or 0)
+    ajat[k - 1] = round(max(0.0, min(float(aika), max(0.0, kesto - 0.5))), 2)
+    oma = sorted(set((lue_json(kd / "kohdat.json") or {}).get("omat", [])) | {k})
+    for nimi in (f"lahde_{k}.npy", f"jakso_{k}.npy", f"jakso_{k}.json"):
+        (kd / nimi).unlink(missing_ok=True)
+    kirjoita_json(kd / "kohdat.json", {"ajat": ajat, "omat": oma})
+    kuvat = lahdekuvat(src, an, geo, kd)
+    ol = mt["oletukset"]
+    for j, n in enumerate(ASETUKSET, 1):
+        with L.lukko:
+            ketju = L.ketju(geo, n, ol.get(str(n)), an)
+            with L.inferenssi():
+                rgb, _ = esikatselukuva(L, ketju, kd, k, kuvat[k - 1], 1000 * k)
+                rgb_png(kd / f"v{n}_k{k}.png", L.ops.numpy(rgb)[0])
+            del ketju, rgb
+            if n != 1:
+                L.vapauta()
+        if edistys:
+            edistys(j, len(ASETUKSET))
+    tiedot = lue_json(kd / "koe.json", {}) or {}
+    tiedot["kohdat"] = kohtatiedot(src, an, geo, kd)
+    kirjoita_json(kd / "koe.json", tiedot)
+    return tiedot["kohdat"]
 
 
 def saatokuva(src, an, geo, wd, L, n, saato, k):
     """Yksi vertailukuva käyttäjän säädöillä (liukusäätimet). Palauttaa tiedostonimen."""
     tun = koe_tunniste(geo)
     kd = wd / f"koe_{tun}"
+    mittaa_tiedosto(src, an, geo, wd)                 # kohdat valitaan mittauksessa (välimuistissa)
     kuvat = lahdekuvat(src, an, geo, kd)
-    avain = hashlib.sha1(json.dumps([n, saato, k], sort_keys=True).encode()).hexdigest()[:10]
+    aika = esikatselukohdat(src, an, geo, kd)[max(1, min(3, int(k))) - 1]
+    avain = hashlib.sha1(json.dumps([n, saato, k, aika], sort_keys=True).encode()).hexdigest()[:10]
     nimi = f"s_{avain}.png"
     if not (kd / nimi).exists():
         with L.lukko, L.inferenssi():

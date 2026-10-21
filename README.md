@@ -18,7 +18,7 @@ Asennusohjelmaa ei ole allekirjoitettu maksullisella varmenteella, joten Windows
 ## Käyttö
 
 1. Vedä video- tai kuvatiedostot ikkunaan tai valitse **Lisää tiedostoja**. DVD-levyn saat tiedostoksi esimerkiksi [MakeMKV](https://www.makemkv.com/)-ohjelmalla.
-2. Ohjelma analysoi videon (kuvanopeus, lomitus, mustat palkit, kuvasuhde) ja suosittelee asetusta.
+2. Ohjelma analysoi videon (kuvanopeus, lomitus, mustat palkit, kuvasuhde), mittaa laadun 16 kohdasta, tunnistaa piirretyt ja suosittelee asetusta. Esikatselun kohtia voi siirtää aikajanalta; kolmas kohta on videon vaikein kohta.
 3. Vertaa asetuksia esikatselussa: vedä jakajaa tai paina **välilyöntiä** vaihtaaksesi alkuperäisen ja paranneltun välillä. **Katso liikkeessä** tekee lyhyen videopätkän.
 4. Valitse **Käsittele**. Käsittelyn voi keskeyttää ja jatkaa myöhemmin samasta kohdasta.
 
