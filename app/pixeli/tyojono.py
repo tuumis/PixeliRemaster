@@ -73,6 +73,12 @@ class Jono:
             t["koe"].pop("siirretaan", None)
             t["liike"] = {}
             t.pop("edistys", None)
+            # uusi versio muuttaa esikatselun tunnisteen: vanhat esikatselut eivät enää vastaa asetuksia
+            try:
+                if t.get("geo") and t["koe"].get("tunniste") and t["koe"]["tunniste"] != self._koe_tunniste(t):
+                    t["koe"] = {"tila": "ei"}
+            except Exception:  # noqa: BLE001
+                t["koe"] = {"tila": "ei"}
             self.tyot.append(t)
 
     def _tallenna(self):

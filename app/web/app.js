@@ -549,9 +549,12 @@ function paivitaKuvat(x, viive = 0) {
     try {
       const r = await api("saatokuva", {id: x.id, asetus: n, saato: nk.saato, k: nk.kohta});
       nk.saatoUrl[avain] = r.url;
-      if (JSON.stringify([nykyinenAsetus(x), nk.saato, nk.kohta, k.versio || 0]) === avain) $("#kuva-o").src = media(x.id, r.url, tun);
+      // vastaus voi tulla vasta, kun käyttäjä on jo siirtynyt toiseen tiedostoon: näytetään vain oikealle
+      const nyt = TILA.jono.tyot.find(y => y.id === valittu);
+      if (valittu === x.id && nyt && nyt.koe && nyt.koe.tunniste === k.tunniste
+          && JSON.stringify([nykyinenAsetus(nyt), nk.saato, nk.kohta, (nyt.koe.versio || 0)]) === avain) $("#kuva-o").src = media(x.id, r.url, tun);
     } catch (e) { /* ilmoitettu */ }
-    $("#vertailu")?.classList.remove("laskee");
+    if (valittu === x.id) $("#vertailu")?.classList.remove("laskee");
   }, viive);
 }
 function paivitaNayttamo(x) {

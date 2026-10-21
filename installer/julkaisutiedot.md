@@ -1,3 +1,6 @@
+**Korjattu 1.4.1:** esikatselussa saattoi näkyä toisen kuvan säädetty versio, jos tiedostoa vaihtoi ennen kuin esikatselu valmistui. Päivityksen jälkeen vanhentuneet esikatselut lasketaan uudelleen vasta, kun tiedoston avaa.
+**Fixed in 1.4.1:** the preview could show another image's adjusted version when switching files before the preview was ready. After an update, outdated previews are recalculated only when the file is opened.
+
 **Uutta 1.4.0:** videoille uusi asetus "Terävin – kokeellinen": monikuvamalli (RealBasicVSR) hakee tarkkuutta naapurikuvista, joten taustat ja tekstuurit tarkentuvat selvästi. Kohtausten vaihdot tunnistetaan, ja esikatselu laskee naapurikuvat mukaan. Nopeasti liikkuvissa kasvoissa voi näkyä repeämiä, ja käsittely on hyvin hidasta – tavallinen asetus on edelleen suositus.
 **New in 1.4.0:** a new video preset "Sharpest – experimental": a multi-frame model (RealBasicVSR) gathers detail from neighboring frames, making backgrounds and textures clearly sharper. Scene changes are detected and the preview includes neighboring frames. Fast-moving faces may show tearing and processing is very slow – the regular presets remain the recommendation.
 
