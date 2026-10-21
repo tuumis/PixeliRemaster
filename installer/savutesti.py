@@ -86,7 +86,7 @@ assert (g["ow"], g["oh"], g["kierrokset"]) == (1920, 1440, 2), g
 from pixeli import mittaus, lisamallit  # noqa: E402
 mm = mittaus.mittaa([(m.testikuva(120, 160)[0].transpose(1, 2, 0) * 255).astype(np.uint8)])
 ol = mittaus.oletukset(mm)
-assert set(ol) == {"2", "3", "4", "5"} and all(0 <= v["kohina"] <= 0.2 for v in ol.values()), (mm, ol)
+assert set(ol) == {"2", "3", "4", "5", "6"} and all(0 <= v["kohina"] <= 0.2 for v in ol.values()), (mm, ol)
 assert set(lisamallit.LUETTELO) and all(t["sha256"] and t["koko"] for t in lisamallit.LUETTELO.values())
 print("kuvat OK, mittaus", mm)
 
