@@ -337,3 +337,12 @@ button,input,select{font:inherit;color:inherit}
 .levy-kortti h3{margin:0 0 6px}
 .levy-kortti p{margin:0 0 10px;color:var(--himmea)}
 .toista-rivi{display:flex;gap:8px;flex-wrap:wrap}
+
+/* työkalut */
+.tyokalut-sisalto{font-size:13.5px;color:var(--himmea)}
+.tyokalut-sisalto dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0 0 10px}
+.tyokalut-sisalto dt{color:var(--himmea)}
+.tyokalut-sisalto dd{margin:0;color:var(--teksti);overflow-wrap:anywhere}
+.tyokalut-sisalto .tyokalut-rivi{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.tyokalut-sisalto .edistys{flex:1;min-width:120px;margin:0}
+.tyokalut-sisalto .virhe{color:#F0A29D}

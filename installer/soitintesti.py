@@ -35,4 +35,35 @@ for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
         assert "Error parsing option" not in loki and "not found" not in loki.lower(), loki
     else:
         assert p.returncode == 0, loki
-print(f"::notice title=soitintesti::mpv ladattu ja purettu, toisto ja vertailutoisto toimivat")
+# päivitys asetuksista: avoin soitin estää vaihdon eikä riko vanhaa versiota
+import time  # noqa: E402
+from pixeli import tyokalut  # noqa: E402
+auki = subprocess.Popen([exe, "--idle=yes", "--vo=null", "--ao=null", "--force-window=no"])
+time.sleep(2)
+try:
+    soitin.lataa()
+    raise AssertionError("avoin soitin vaihdettiin")
+except RuntimeError as e:
+    assert str(e) == "soitin_kaytossa", e
+finally:
+    auki.kill()
+    auki.wait()
+time.sleep(1)
+assert subprocess.run([exe, "--version"], capture_output=True).returncode == 0
+print("versio:", soitin.versio())
+
+
+class Jono:
+    _kasiteltava = _kasiteltava_kuva = _ripattava = None
+
+
+tyokalut.paivita(Jono())
+for _ in range(600):
+    time.sleep(1)
+    if tyokalut.TILA["tila"] != "kaynnissa":
+        break
+print("työkalut:", tyokalut.TILA, tyokalut.tiedot())
+assert tyokalut.TILA["tila"] == "valmis", tyokalut.TILA
+assert tyokalut.ffmpeg_versio() and soitin.versio() and soitin.versio() != "?"
+print(f"::notice title=soitintesti::mpv {soitin.versio()} ladattu, toisto ja vertailutoisto toimivat, "
+      f"työkalujen päivitys toimii (ffmpeg {tyokalut.ffmpeg_versio()})")

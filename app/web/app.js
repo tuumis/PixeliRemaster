@@ -131,6 +131,7 @@ function piirra() {
   piirraAlapalkki();
   piirraPaivitys();
   piirraSoitin();
+  piirraTyokalut();
   ilmoitaValmiit();
 }
 
@@ -928,6 +929,36 @@ async function aloitaLevy() {
   hae_kerran();
 }
 
+/* ------------------------------------------------------------ työkalut (asetuksissa) */
+let tyokaluVersiot = null;
+async function haeTyokalut() {
+  tyokaluVersiot = await api("tyokalut").catch(() => null);
+  piirraTyokalut();
+}
+function piirraTyokalut() {
+  const c = $("#tyokalut-sisalto"); if (!c || !$("#asetukset").open) return;
+  const v = tyokaluVersiot || {}, p = TILA.tyokalut || {};
+  const kasittely = TILA.jono.kasiteltava || TILA.jono.kasiteltava_kuva || TILA.jono.tyot.some(x => x.tila === "ripataan");
+  const kaynnissa = p.tila === "kaynnissa";
+  let tila = "";
+  if (kaynnissa) tila = `<span>${t("tyokalut.ladataan." + (p.vaihe || "ffmpeg"))}</span><div class="edistys"><i style="width:${(100 * (p.edistys || 0)).toFixed(1)}%"></i></div>`;
+  else if (p.tila === "valmis") tila = `<span>${t("tyokalut.valmis")}</span>`;
+  else if (p.tila === "virhe") tila = `<span class="virhe">${t("tyokalut.virhe." + (p.virhe || "lataus"))}</span>`;
+  else if (kasittely) tila = `<span>${t("tyokalut.kasittely")}</span>`;
+  const h = `<dl><dt>${t("tyokalut.mpv")}</dt><dd>${v.mpv ? esc(v.mpv) : t("tyokalut.ei_ladattu")}</dd>
+      <dt>${t("tyokalut.ffmpeg")}</dt><dd>${v.ffmpeg ? esc(v.ffmpeg) : "–"}</dd></dl>
+    <div class="tyokalut-rivi"><button type="button" class="painike pieni toissijainen" id="tyokalut-paivita" ${kaynnissa || kasittely ? "disabled" : ""}>${t("tyokalut.paivita")}</button>${tila}</div>`;
+  if (c.dataset.html !== h) {
+    c.innerHTML = h; c.dataset.html = h;
+    $("#tyokalut-paivita").addEventListener("click", async () => {
+      const r = await api("tyokalut_paivita").catch(e => ({virhe: String(e.message || e)}));
+      if (r.virhe === "kasittely_kaynnissa") ilmoita(t("tyokalut.kasittely"));
+      hae_kerran();
+    });
+  }
+  if (p.tila === "valmis" && tyokaluVersiot && tyokaluVersiot.paivitys && tyokaluVersiot.paivitys.tila !== "valmis") haeTyokalut();
+}
+
 /* ------------------------------------------------------------ päivitys */
 function piirraPaivitys() {
   const p = TILA.paivitys || {}, nappi = $("#paivitys-nappi");
@@ -981,6 +1012,8 @@ function avaaAsetukset() {
     <li>FFmpeg (GPL, ladataan erikseen / downloaded separately)</li><li>Barlow-kirjasin / typeface – Jeremy Tribby (OFL)</li></ul>`;
   $("#tietoja-paivitys")?.addEventListener("click", e => { e.preventDefault(); $("#asetukset").close(); avaaPaivitys(); });
   $("#asetukset").showModal();
+  $("#tyokalut-sisalto").dataset.html = "";
+  haeTyokalut();
 }
 function kytkeAsetukset() {
   $("#asetukset-nappi").addEventListener("click", avaaAsetukset);

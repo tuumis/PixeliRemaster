@@ -22,6 +22,7 @@ from . import moottori as m
 from . import levy
 from . import paivitys
 from . import soitin
+from . import tyokalut
 
 WEB = m.SOVELLUS / "web"
 MIME = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -67,7 +68,7 @@ class Sovellus:
                 "esiasetukset": esi(False), "esiasetukset_kuva": esi(True), "mallit": lisamallit.tila(),
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
-                "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "soitin": soitin.tila(),
+                "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "soitin": soitin.tila(), "tyokalut": dict(tyokalut.TILA),
                 "makemkv": bool(levy.makemkvcon()), "aika": time.time()}
 
     # ------------------------------------------------------------ API
@@ -163,6 +164,10 @@ class Sovellus:
         if polku == "levy_lisaa":
             return j.lisaa_levylta(int(d["indeksi"]), int(d["nimike"]), d.get("levy") or "", d.get("kesto") or 0,
                                    bool(d.get("kasittele", True)), bool(d.get("sailyta", True)))
+        if polku == "tyokalut":
+            return tyokalut.tiedot()
+        if polku == "tyokalut_paivita":
+            return tyokalut.paivita(j)
         if polku == "toista":
             return self.toista(d["id"], d.get("tapa") or "tulos")
         if polku == "paivita":

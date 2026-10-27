@@ -41,6 +41,16 @@ def mpv_exe():
     return shutil.which("mpv")
 
 
+def versio():
+    """Ladatun paketin päiväys ja git-tunniste, esim. '2026-08-21 (49418246f3)'."""
+    try:
+        n = (kansio() / "pixeli_versio.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "?" if mpv_exe() else None
+    r = re.search(r"-(\d{4})(\d{2})(\d{2})-git-([0-9a-f]+)", n)
+    return f"{r.group(1)}-{r.group(2)}-{r.group(3)} ({r.group(4)})" if r else n
+
+
 def tila():
     d = dict(TILA)
     d["asennettu"] = bool(mpv_exe())
@@ -115,8 +125,17 @@ def lataa(edistys=None):
     exe = next(purettu.rglob("mpv.exe"), None)
     if exe is None:
         raise RuntimeError("mpv_purku")
-    shutil.rmtree(k, ignore_errors=True)
+    (exe.parent / "pixeli_versio.txt").write_text(paketti["name"], encoding="utf-8")
+    vanha = k.parent / "mpv_vanha"
+    shutil.rmtree(vanha, ignore_errors=True)
+    if k.exists():
+        try:
+            k.rename(vanha)            # Windows ei salli siirtoa, jos soitin on auki: vanha jää ehjäksi
+        except OSError:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise RuntimeError("soitin_kaytossa")
     shutil.move(str(exe.parent), str(k))
+    shutil.rmtree(vanha, ignore_errors=True)
     shutil.rmtree(tmp, ignore_errors=True)
     m.loki(f"mpv asennettu: {paketti['name']}")
     if edistys:
