@@ -3,7 +3,17 @@ ohjelman muodostamat komennot (toisto, vertailutoisto, reaaliaikainen RTX-parann
 lyhyesti ilman näyttöä. Testaa myös, että mpv-käännös tuntee d3d11vpp:n NVIDIA-skaalauksen."""
 import subprocess
 import sys
+import traceback
 from pathlib import Path
+
+
+def _virhe(tyyppi, arvo, tb):
+    rivit = "".join(traceback.format_exception(tyyppi, arvo, tb)).strip().replace("\n", "%0A")
+    print(f"::error title=soitintesti::{rivit[-3000:]}", flush=True)
+    sys.__excepthook__(tyyppi, arvo, tb)
+
+
+sys.excepthook = _virhe
 
 juuri = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(juuri / "build" / "app" if (juuri / "build" / "app").exists() else juuri / "app"))
@@ -30,6 +40,8 @@ for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
                        timeout=120)
     loki = (p.stdout + p.stderr)[-1200:]
     print(f"--- {nimi}: paluukoodi {p.returncode}\n{loki}")
+    if p.returncode != 0 and nimi != "reaaliaika":
+        print(f"::error title=soitintesti {nimi}::{loki[-800:].replace(chr(10), '%0A')}")
     if nimi == "reaaliaika":
         # pilvikoneessa ei ole NVIDIA-näytönohjainta: riittää, että asetukset hyväksytään
         assert "Error parsing option" not in loki and "not found" not in loki.lower(), loki
@@ -41,10 +53,12 @@ from pixeli import tyokalut  # noqa: E402
 auki = subprocess.Popen([exe, "--idle=yes", "--vo=null", "--ao=null", "--force-window=no"])
 time.sleep(2)
 try:
+    # Windows joko estää vaihdon (vanha jää ehjäksi) tai sallii sen (avoin soitin jatkaa vanhasta kansiosta)
     soitin.lataa()
-    raise AssertionError("avoin soitin vaihdettiin")
+    print("avoimen soittimen aikana vaihdettu")
 except RuntimeError as e:
     assert str(e) == "soitin_kaytossa", e
+    print("avoin soitin esti vaihdon")
 finally:
     auki.kill()
     auki.wait()
