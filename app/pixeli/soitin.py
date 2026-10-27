@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -126,8 +127,9 @@ def lataa(edistys=None):
     if exe is None:
         raise RuntimeError("mpv_purku")
     (exe.parent / "pixeli_versio.txt").write_text(paketti["name"], encoding="utf-8")
-    vanha = k.parent / "mpv_vanha"
-    shutil.rmtree(vanha, ignore_errors=True)
+    for q in k.parent.glob("mpv_vanha*"):        # aiemmin auki olleen soittimen jäänteet
+        shutil.rmtree(q, ignore_errors=True)
+    vanha = k.parent / f"mpv_vanha_{os.getpid()}_{int(time.time())}"
     if k.exists():
         try:
             k.rename(vanha)            # Windows ei salli siirtoa, jos soitin on auki: vanha jää ehjäksi
