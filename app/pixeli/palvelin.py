@@ -19,7 +19,9 @@ from . import asennus
 from . import kuvat
 from . import lisamallit
 from . import moottori as m
+from . import levy
 from . import paivitys
+from . import soitin
 
 WEB = m.SOVELLUS / "web"
 MIME = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -65,7 +67,8 @@ class Sovellus:
                 "esiasetukset": esi(False), "esiasetukset_kuva": esi(True), "mallit": lisamallit.tila(),
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
-                "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "aika": time.time()}
+                "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "soitin": soitin.tila(),
+                "makemkv": bool(levy.makemkvcon()), "aika": time.time()}
 
     # ------------------------------------------------------------ API
     def api(self, polku, d):
@@ -151,6 +154,17 @@ class Sovellus:
                 kohde = (t.get("tulos") or {}).get("ulos") or t["polku"]
                 asennus.avaa_kansio(kohde)
             return {}
+        if polku == "levy_asemat":
+            if not levy.makemkvcon():
+                return {"makemkv": False, "asemat": []}
+            return {"makemkv": True, "asemat": levy.asemat()}
+        if polku == "levy_nimikkeet":
+            return levy.nimikkeet(int(d["indeksi"]))
+        if polku == "levy_lisaa":
+            return j.lisaa_levylta(int(d["indeksi"]), int(d["nimike"]), d.get("levy") or "", d.get("kesto") or 0,
+                                   bool(d.get("kasittele", True)), bool(d.get("sailyta", True)))
+        if polku == "toista":
+            return self.toista(d["id"], d.get("tapa") or "tulos")
         if polku == "paivita":
             return paivitys.paivita(self)
         if polku == "tarkista_paivitys":
@@ -162,6 +176,27 @@ class Sovellus:
                 self.ikkuna.nayta()
             return {}
         raise KeyError("tuntematon")
+
+    def toista(self, tid, tapa):
+        j = self.jono
+        with j.lukko:
+            t = dict(j._tyo(tid))
+        an, geo = t.get("analyysi"), t.get("geo")
+        tulos = (t.get("tulos") or {}).get("ulos")
+        nimi = Path(t.get("polku") or t.get("nimi") or "").stem
+        if tapa in ("tulos", "vertaa") and (not tulos or not Path(tulos).is_file()):
+            raise KeyError("tiedostoa_ei_loydy")
+        if not t.get("polku") or not Path(t["polku"]).is_file():
+            if tapa != "tulos":
+                raise KeyError("tiedostoa_ei_loydy")
+        if tapa == "tulos":
+            tee = lambda: soitin.komento_toista(tulos, nimi)  # noqa: E731
+        elif tapa == "vertaa":
+            tee = lambda: soitin.komento_vertaa(tulos, t["polku"], an, geo, nimi)  # noqa: E731
+        else:
+            korkeus = j.kohde()[1]
+            tee = lambda: soitin.komento_reaaliaika(t["polku"], an or {}, korkeus, nimi)  # noqa: E731
+        return soitin.varmista_ja_kaynnista(tee)
 
     def media(self, tid, suhteellinen):
         """Tiedosto elokuvan työkansiosta (koekuvat, liikepätkät, pikkukuva)."""

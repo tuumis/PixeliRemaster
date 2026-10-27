@@ -40,4 +40,6 @@ Muut arkkitehtuurit (DRUNet, RetinaFace, GFPGAN, RealBasicVSR, naarmujen tunnist
 | PyTorch | BSD-3-Clause | ladataan ensimmäisellä käynnistyksellä / downloaded on first launch |
 | pillow-heif, Pillow (HEIC-kuvat / iPhone photos) | BSD-3-Clause, MIT-CMU; mukana libheif ja libde265 (LGPL-3.0) | ladataan ensimmäisellä käynnistyksellä PyPI:stä / downloaded on first launch from PyPI |
 | FFmpeg (BtbN builds) | GPL | ladataan ensimmäisellä käynnistyksellä / downloaded on first launch; https://github.com/BtbN/FFmpeg-Builds |
+| mpv (shinchiro/mpv-winbuild-cmake) | GPL-2.0+ / LGPL | ladataan ensimmäisellä toistolla / downloaded on first playback; https://mpv.io, https://github.com/shinchiro/mpv-winbuild-cmake |
+| MakeMKV | oma lisenssi / proprietary | ei mukana – käytetään käyttäjän itse asentamaa ohjelmaa / not included – the user's own installation is used; https://www.makemkv.com |
 | Barlow-kirjasin / typeface | SIL Open Font License 1.1 | `app/web/fontit/OFL.txt` |

@@ -49,10 +49,18 @@ class Jono:
         self._koe_q = queue.Queue()
         self._laitteet = {}
         self._lopeta = False
+        self._levy_q = queue.Queue()
+        self._peruuta_levy = threading.Event()
+        self._ripattava = None
         self._lataa()
-        for nimi, kohde in (("analyysi", self._analyysi_saie), ("gpu", self._gpu_saie), ("koe", self._koe_saie)):
+        for nimi, kohde in (("analyysi", self._analyysi_saie), ("gpu", self._gpu_saie), ("koe", self._koe_saie),
+                            ("levy", self._levy_saie)):
             threading.Thread(target=kohde, name=nimi, daemon=True).start()
         for t in self.tyot:
+            if t["tila"] == "ripataan":          # keskeytynyt rippaus aloitetaan alusta
+                t.setdefault("levy", {})["edistys"] = 0.0
+                self._levy_q.put(t["id"])
+                continue
             if t["tila"] == "analysoidaan" or (t["tila"] not in ("valmis", "virhe") and not t.get("analyysi")):
                 t["tila"] = "analysoidaan"
                 self._analyysi_q.put(t["id"])
@@ -181,6 +189,82 @@ class Jono:
         self._tallenna()
         return {"lisatyt": lisatyt, "ohitetut": ohitetut}
 
+    def levykansio(self):
+        """Levyltä kopioidut elokuvat: valittu tallennuskansio tai Videot\\PixeliRemaster."""
+        k = self.asetukset.get("ulos_kansio")
+        return Path(k) if k else Path.home() / "Videos" / "PixeliRemaster"
+
+    def lisaa_levylta(self, indeksi, nimike, levyn_nimi, kesto=0, kasittele=True, sailyta=True):
+        from . import levy
+        nimi = levy.turvallinen_nimi(levyn_nimi)
+        with self.lukko:
+            t = {"id": _uusi_id(), "polku": "", "nimi": nimi + ".mkv", "lisatty": time.time(), "laji": "video",
+                 "tila": "ripataan", "valinta": {}, "koe": {"tila": "ei"}, "liike": {},
+                 "levy": {"indeksi": int(indeksi), "nimike": int(nimike), "nimi": nimi, "kesto": kesto,
+                          "kasittele": bool(kasittele), "sailyta": bool(sailyta), "edistys": 0.0}}
+            self.tyot.append(t)
+        self._levy_q.put(t["id"])
+        self._tallenna()
+        return {"id": t["id"]}
+
+    def _levy_saie(self):
+        from . import levy
+        while not self._lopeta:
+            tid = self._levy_q.get()
+            if tid is None:
+                return
+            try:
+                with self.lukko:
+                    t = self._tyo(tid)
+                    if t["tila"] != "ripataan":
+                        continue
+                    lv = t["levy"]
+                    self._ripattava = tid
+                self._peruuta_levy.clear()
+                kansio = self.levykansio()
+                tmp = kansio / f".pixeli_rippaus_{tid}"
+
+                def ed(f, lv=lv):
+                    with self.lukko:
+                        lv["edistys"] = round(min(1.0, max(0.0, f)), 4)
+                alku = time.time()
+                mkv = levy.rippaa(lv["indeksi"], lv["nimike"], tmp, ed, self._peruuta_levy)
+                kohde = kansio / f"{lv['nimi']}.mkv"
+                n = 2
+                while kohde.exists():
+                    kohde = kansio / f"{lv['nimi']} ({n}).mkv"
+                    n += 1
+                mkv.replace(kohde)
+                try:
+                    for q in tmp.iterdir():
+                        q.unlink()
+                    tmp.rmdir()
+                except OSError:
+                    pass
+                m.loki(f"Levyltä kopioitu {kohde} ({time.time() - alku:.0f} s)")
+                with self.lukko:
+                    t["polku"] = str(kohde)
+                    t["nimi"] = kohde.name
+                    t["tila"] = "analysoidaan"
+                    lv.pop("edistys", None)
+                self._analyysi_q.put(tid)
+            except KeyError:
+                pass
+            except m.Peruutettu:
+                with self.lukko:
+                    if t in self.tyot and not self._lopeta:      # suljettaessa jatketaan seuraavalla kerralla
+                        self.tyot.remove(t)
+            except Exception as e:  # noqa: BLE001
+                m.loki(f"Levyn kopiointi epäonnistui: {traceback.format_exc()}")
+                with self.lukko:
+                    t["tila"] = "virhe"
+                    t["virhe"] = {"avain": "makemkv_puuttuu" if str(e) == "makemkv_puuttuu" else "rippaus",
+                                  "tieto": str(e)[-400:]}
+            finally:
+                with self.lukko:
+                    self._ripattava = None
+                self._tallenna()
+
     def poista(self, tid):
         with self.lukko:
             t = self._tyo(tid)
@@ -188,6 +272,8 @@ class Jono:
                 self._peruuta.set()
             if self._kasiteltava_kuva == tid:
                 self._peruuta_kuva.set()
+            if self._ripattava == tid:
+                self._peruuta_levy.set()
             self.tyot.remove(t)
         self._tallenna()
 
@@ -380,8 +466,10 @@ class Jono:
         self._peruuta.set()
         self._peruuta_kuva.set()
         self._herata.set()
+        self._peruuta_levy.set()
         self._koe_q.put(None)
         self._analyysi_q.put(None)
+        self._levy_q.put(None)
         self._tallenna()
 
     # ------------------------------------------------------------ tila käyttöliittymälle
@@ -445,6 +533,9 @@ class Jono:
                     self._paivita_geometria(t)
                     if t["tila"] == "analysoidaan":
                         t["tila"] = "hd" if an["tyyppi"] == "hd" else "odottaa"
+                        if t["tila"] == "odottaa" and (t.get("levy") or {}).pop("kasittele", False):
+                            t["tila"] = "jonossa"          # levyltä: käsittely alkaa suositellulla asetuksella
+                            self._herata.set()
                     vanha = (t.get("koe") or {}).get("tunniste")
                     if vanha and vanha != self._koe_tunniste(t):
                         t["koe"] = {"tila": "ei"}
@@ -476,7 +567,7 @@ class Jono:
 
     def _kaikki_valmiit(self):
         with self.lukko:
-            return not any(t["tila"] in ("jonossa", "kasitellaan") for t in self.tyot)
+            return not any(t["tila"] in ("jonossa", "kasitellaan", "ripataan") for t in self.tyot)
 
     def _gpu_saie(self):
         while not self._lopeta:
@@ -534,6 +625,13 @@ class Jono:
                     t["tulos"] = tulos
                     t["valmistui"] = time.time()
                 m.loki(f"Valmis: {tulos['ulos']}")
+                if t.get("levy") and not t["levy"].get("sailyta", True):
+                    try:
+                        polku.unlink()                  # levyltä kopioitu välitiedosto
+                        with self.lukko:
+                            t["levy"]["poistettu"] = True
+                    except OSError:
+                        pass
             except m.Peruutettu:
                 with self.lukko:
                     if t in self.tyot:

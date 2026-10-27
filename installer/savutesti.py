@@ -148,6 +148,19 @@ assert [x["versio"] for x in _mt["fi"]] == ["1.7.0", "1.6.1"] and _mt["en"][0]["
 assert not _pv.asennettu() or os.name == "nt"
 print("päivitys OK")
 
+# levyltä (MakeMKV:n robottituloste) ja soittimen komennot
+from pixeli import levy as _lv, soitin as _so  # noqa: E402
+_r = _lv.jasenna('DRV:0,2,999,1,"HL-DT-ST DVDRAM","ELOKUVA","F:"\nDRV:1,256,999,0,"","",""\n'
+                 'CINFO:2,0,"Elokuva, osa 2"\nTINFO:0,9,0,"1:45:32"\nTINFO:0,8,0,"24"\nTINFO:1,9,0,"0:02:10"\n'
+                 'MSG:5010,0,0,"Failed to open disc","x"')
+assert _r["asemat"] == [{"indeksi": 0, "asema": "HL-DT-ST DVDRAM", "levy": "ELOKUVA", "polku": "F:", "levy_sisalla": True}], _r
+assert _r["levy"][2] == "Elokuva, osa 2" and _lv.kesto_s(_r["nimikkeet"][0][9]) == 6332 and _r["viestit"] == ["Failed to open disc"]
+assert _lv.turvallinen_nimi('Elokuva: "Paluu"?') == "Elokuva Paluu"
+_g = _so.vertailusuodin({"leveys": 720, "korkeus": 576, "lomitus": "lomitettu"}, {"rajaus": [0, 72, 720, 432], "ow": 2560, "oh": 1440})
+assert "[vid2]bwdif" in _g and "crop=720:432:0:72" in _g and _g.endswith("[aid1]anull[ao]"), _g
+assert _so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440) == "@rtx:d3d11vpp=deint=yes:interlaced-only=yes:scale=2.5:scaling-mode=nvidia"
+print("levy ja soitin OK")
+
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
 sov = palvelin.Sovellus(jono, ymp)

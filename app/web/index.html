@@ -41,7 +41,8 @@
     <ul id="jono-lista" class="jono-lista"></ul>
     <div class="jono-ala">
       <div class="lisaa-rivi"><button class="painike toissijainen" id="lisaa" data-t="jono.lisaa"></button>
-        <button class="painike toissijainen" id="lisaa-kansio" data-t="jono.lisaa_kansio"></button></div>
+        <button class="painike toissijainen" id="lisaa-kansio" data-t="jono.lisaa_kansio"></button>
+        <button class="painike toissijainen" id="lisaa-levy" data-t="jono.lisaa_levy"></button></div>
       <p class="vihje" id="pudota-vihje" data-t="jono.pudota_vihje"></p>
     </div>
   </aside>
@@ -86,6 +87,17 @@
     <div class="toiminnot">
       <button class="painike haamu" type="button" id="avaa-loki" data-t="yleinen.avaa_loki"></button>
       <button class="painike ensisijainen" value="ok" data-t="yleinen.sulje"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="levy" class="dialogi">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 data-t="levy.otsikko"></h2>
+    <div id="levy-sisalto" class="levy-sisalto"></div>
+    <div class="toiminnot">
+      <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
+      <button class="painike ensisijainen" type="button" id="levy-aloita" data-t="levy.aloita" disabled></button>
     </div>
   </form>
 </dialog>

@@ -109,7 +109,7 @@ button,input,select{font:inherit;color:inherit}
 .kohta .nimi{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
 .kohta .tila{font-size:12.5px;color:var(--himmea);display:flex;gap:6px;align-items:center}
 .kohta .tila .pallo{width:7px;height:7px;border-radius:50%;background:var(--hiljainen);flex:none}
-.kohta .tila.kasitellaan .pallo{background:var(--syaani)}
+.kohta .tila.kasitellaan .pallo,.kohta .tila.ripataan .pallo{background:var(--syaani)}
 .kohta .tila.valmis .pallo{background:var(--vihrea)}
 .kohta .tila.virhe .pallo{background:var(--punainen)}
 .kohta .tila.jonossa .pallo{background:var(--keltainen)}
@@ -317,3 +317,23 @@ button,input,select{font:inherit;color:inherit}
 .paivitys-sisalto .muutos b{color:var(--teksti);font-weight:600}
 .paivitys-sisalto .huom{color:var(--teksti);margin:12px 0 0}
 .paivitys-sisalto .virhe{color:#F0A29D}
+
+/* levyltä */
+.lisaa-rivi{grid-template-columns:1fr 1fr}
+.lisaa-rivi #lisaa{grid-column:1/-1}
+.levy-sisalto{font-size:14px;color:var(--himmea);min-height:120px}
+.levy-sisalto .nimikkeet{display:flex;flex-direction:column;gap:4px;max-height:38vh;overflow:auto;margin:10px 0}
+.levy-sisalto .nimike{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:7px 10px;border:1px solid var(--viiva);border-radius:var(--r-pieni);cursor:pointer;color:var(--teksti)}
+.levy-sisalto .nimike:has(input:checked){border-color:var(--syaani);background:rgba(70,200,200,.08)}
+.levy-sisalto .nimike input{accent-color:var(--syaani)}
+.levy-sisalto .nimike small{color:var(--himmea)}
+.levy-sisalto .merkki-paa{color:var(--syaani);font-size:12px;margin-left:6px}
+.levy-sisalto .valinnat-levy{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.levy-sisalto .valinnat-levy label{display:flex;gap:8px;align-items:center;color:var(--teksti)}
+.levy-sisalto .valinnat-levy input{accent-color:var(--syaani)}
+.levy-sisalto select{background:var(--nosto);border:1px solid var(--viiva);border-radius:var(--r-pieni);padding:5px 8px;color:var(--teksti)}
+.levy-sisalto code{font-size:12.5px}
+.levy-kortti{margin:0 0 14px;padding:16px 18px;border:1px solid var(--viiva);border-radius:12px;background:var(--paneeli)}
+.levy-kortti h3{margin:0 0 6px}
+.levy-kortti p{margin:0 0 10px;color:var(--himmea)}
+.toista-rivi{display:flex;gap:8px;flex-wrap:wrap}

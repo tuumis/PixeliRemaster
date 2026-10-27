@@ -53,6 +53,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC epäonnistui" }
           Get-ChildItem dist
 
+      - name: Soitintesti (mpv:n lataus, 7z-purku ja komennot Windowsissa)
+        shell: pwsh
+        env:
+          PIXELI_GH_TOKEN: ${{ github.token }}
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "pixeli_soitin"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:PIXELI_DATA = $data
+          $env:PIXELI_LAITE = "numpy"
+          ffmpeg -loglevel error -y -f lavfi -i testsrc2=s=720x576:r=25:d=4 -f lavfi -i sine=d=4 -c:v mpeg2video -aspect 16:9 -c:a ac3 -shortest "$data\alkup.mkv"
+          ffmpeg -loglevel error -y -i "$data\alkup.mkv" -vf "scale=1280:720,setsar=1" -c:v libx265 -pix_fmt yuv420p10le -preset ultrafast -c:a copy "$data\remaster.mkv"
+          ./build/python/python.exe installer/soitintesti.py $data
+          if ($LASTEXITCODE -ne 0) { throw "soitintesti epäonnistui" }
+
       - name: Päivitystesti (ohjelman sisäinen päivitys edellisestä julkaisusta)
         shell: pwsh
         env:
