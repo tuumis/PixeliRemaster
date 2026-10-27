@@ -53,6 +53,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC epäonnistui" }
           Get-ChildItem dist
 
+      - name: Päivitystesti (ohjelman sisäinen päivitys edellisestä julkaisusta)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 1) edellinen julkaistu versio asennetaan kuten käyttäjällä
+          gh release download --repo ${{ github.repository }} --pattern "*-Setup.exe" --dir vanha
+          $vanha = Get-ChildItem vanha\*-Setup.exe | Select-Object -First 1
+          Start-Process $vanha.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          $koti = "$env:LOCALAPPDATA\Programs\PixeliRemaster"
+          if (-not (Test-Path "$koti\app\kaynnista.py")) { throw "vanhan version asennus epäonnistui" }
+          # 2) sovelluksen oma päivityskoodi: apuprosessi odottaa ohjelman sulkeutumista ja asentaa hiljaisena
+          $uusi = (Get-ChildItem dist\*-Setup.exe | Select-Object -First 1).FullName
+          $data = Join-Path $env:RUNNER_TEMP "pixeli_paivitys"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:PIXELI_DATA = $data
+          $env:PIXELI_LAITE = "numpy"
+          $env:PIXELI_IKKUNA = "selain"
+          ./build/python/python.exe -c "import sys; sys.path.insert(0, 'build/app'); from pathlib import Path; from pixeli import paivitys; (Path(sys.argv[2]) / 'paivitys').mkdir(parents=True, exist_ok=True); paivitys._apuprosessi(Path(sys.argv[1]))" $uusi $data
+          # 3) uusi versio asentuu ja käynnistyy itsestään (instanssi.json kirjoitetaan, kun palvelin vastaa)
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 2
+            if ((Test-Path "$data\instanssi.json") -and (Select-String -Path "$koti\app\pixeli\moottori.py" -Pattern "VERSIO = `"$env:VERSIO`"" -Quiet)) { $ok = $true; break }
+          }
+          Get-Content "$data\paivitys\asennus.log" -ErrorAction SilentlyContinue | Select-Object -Last 15
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*kaynnista.py*" } | ForEach-Object { Write-Host "käynnissä: $($_.ProcessId) $($_.CommandLine)"; Stop-Process -Id $_.ProcessId -Force }
+          if (-not $ok) { throw "päivitys ei asentunut tai uusi versio ei käynnistynyt" }
+          Write-Host "::notice title=paivitystesti::$($vanha.Name) -> $env:VERSIO asentui ja käynnistyi itsestään"
+
       - uses: actions/upload-artifact@v4
         with:
           name: PixeliRemaster-${{ env.VERSIO }}-Setup

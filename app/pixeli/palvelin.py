@@ -19,6 +19,7 @@ from . import asennus
 from . import kuvat
 from . import lisamallit
 from . import moottori as m
+from . import paivitys
 
 WEB = m.SOVELLUS / "web"
 MIME = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -64,7 +65,7 @@ class Sovellus:
                 "esiasetukset": esi(False), "esiasetukset_kuva": esi(True), "mallit": lisamallit.tila(),
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
-                "datakansio": str(m.DATA), "aika": time.time()}
+                "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "aika": time.time()}
 
     # ------------------------------------------------------------ API
     def api(self, polku, d):
@@ -149,6 +150,12 @@ class Sovellus:
                 t = j._tyo(d["id"])
                 kohde = (t.get("tulos") or {}).get("ulos") or t["polku"]
                 asennus.avaa_kansio(kohde)
+            return {}
+        if polku == "paivita":
+            return paivitys.paivita(self)
+        if polku == "tarkista_paivitys":
+            if paivitys.asennettu():
+                threading.Thread(target=paivitys.tarkista, daemon=True).start()
             return {}
         if polku == "nayta":
             if self.ikkuna and hasattr(self.ikkuna, "nayta"):

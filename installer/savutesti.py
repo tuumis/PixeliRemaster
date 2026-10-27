@@ -140,6 +140,14 @@ _C = np.hypot(_h[..., 0], _h[..., 1])[0]
 assert np.allclose(_h[0, 0], _ab[0, 0]) and 40 < _C[1] < _vr.MAKSIMI and _C[2] < 15, _C
 print("värien hillintä OK")
 
+# päivitys: versiovertailu ja julkaisutietojen muutokset (vain nykyistä uudemmat)
+from pixeli import paivitys as _pv  # noqa: E402
+assert _pv.versio("v1.10.0") > _pv.versio("1.9.3") and _pv.versio("mallit-1") is None
+_mt = _pv.muutokset("**Uutta 1.7.0:** a\n**New in 1.7.0:** b\n**Korjattu 1.6.1:** c\n**Uutta 1.6.0:** d", (1, 6, 0))
+assert [x["versio"] for x in _mt["fi"]] == ["1.7.0", "1.6.1"] and _mt["en"][0]["teksti"] == "b", _mt
+assert not _pv.asennettu() or os.name == "nt"
+print("päivitys OK")
+
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
 sov = palvelin.Sovellus(jono, ymp)

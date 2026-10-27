@@ -76,6 +76,8 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\{#Paatteet[i]}\shel
 
 [Run]
 Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\kaynnista.py"""; WorkingDir: "{app}\app"; Description: "{cm:Kaynnista}"; Flags: postinstall nowait skipifsilent
+; ohjelman sisäinen päivitys (hiljainen asennus /PAIVITYS=1): uusi versio käynnistyy itsestään
+Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\kaynnista.py"""; WorkingDir: "{app}\app"; Flags: nowait; Check: OnPaivitys
 
 [UninstallDelete]
 ; ensimmäisellä käynnistyksellä ladattu PyTorch on python-kansiossa
@@ -83,6 +85,11 @@ Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\app"
 
 [Code]
+function OnPaivitys: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:PAIVITYS|0}') = '1');
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Data: String;

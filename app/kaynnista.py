@@ -93,6 +93,9 @@ def main():
         pass
     if polut:
         jono.lisaa(polut)
+    from pixeli import paivitys
+    paivitys.jatka(jono)                 # päivityksen jälkeen käsittely jatkuu
+    paivitys.kaynnista_tarkistus()
 
     def kieli():
         k = jono.asetukset.get("kieli") or "auto"

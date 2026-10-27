@@ -14,6 +14,7 @@
 <header class="ylapalkki">
   <div class="merkki"><img src="/web/pixeli-28.svg" alt="" width="28" height="28"><span>PixeliRemaster</span></div>
   <div class="ylapalkki-oikea">
+    <button class="painike pieni paivitys-nappi" id="paivitys-nappi" hidden></button>
     <button class="painike haamu" id="asetukset-nappi" data-t="asetukset.avaa"></button>
   </div>
 </header>
@@ -85,6 +86,17 @@
     <div class="toiminnot">
       <button class="painike haamu" type="button" id="avaa-loki" data-t="yleinen.avaa_loki"></button>
       <button class="painike ensisijainen" value="ok" data-t="yleinen.sulje"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="paivitys" class="dialogi">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 id="paivitys-otsikko"></h2>
+    <div id="paivitys-sisalto" class="paivitys-sisalto"></div>
+    <div class="toiminnot">
+      <button class="painike haamu" value="ok" id="paivitys-myohemmin" data-t="paivitys.myohemmin"></button>
+      <button class="painike ensisijainen" type="button" id="paivitys-aloita" data-t="paivitys.paivita"></button>
     </div>
   </form>
 </dialog>

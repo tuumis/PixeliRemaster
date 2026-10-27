@@ -34,6 +34,8 @@ JPEG-, PNG-, HEIC- (iPhone), WebP-, BMP- ja TIFF-kuvat käsitellään samalla te
 
 **Vanhat valokuvat:** naarmujen, taitteiden ja pölyn poisto (tunnistus + täyttö tekoälyllä), mustavalkoisen tai seepiakuvan väritys (kirkkaus ja yksityiskohdat säilyvät alkuperäisinä) ja kasvojen palautus. Mallit ladataan ensimmäisellä käytöllä. Väritys on tehty valokuville; viivapiirroksia ja sarjakuvia se ei osaa värittää.
 
+**Päivitykset:** ohjelma tarkistaa uudet versiot GitHubista käynnistyessä. Kun päivitys on saatavilla, yläpalkissa näkyy ilmoitus, ja **Päivitä nyt** lataa, tarkistaa ja asentaa sen; ohjelma käynnistyy uudelleen ja keskeneräinen käsittely jatkuu.
+
 **Tehonkäyttö:** alapalkista voi valita **Täysi**, **Tasapainoinen** tai **Hiljainen**. Rajoitetulla tasolla näytönohjain pitää laskennan välissä taukoja: kone pysyy viileämpänä ja hiljaisempana, ja videon käsittely kestää noin 1,5- tai 2,5-kertaisesti. Tason voi vaihtaa kesken käsittelyn.
 
 - JPEG-kuvasta tulee `Nimi [Remaster].jpg`, muista `Nimi [Remaster].png`.
@@ -94,7 +96,7 @@ PixeliRemaster improves DVD movies, TV recordings, old video files and images wi
 
 **Requirements:** Windows 10/11 64-bit, an NVIDIA GeForce/RTX graphics card with a current driver, about 8 GB free disk space (about 3 GB of AI components are downloaded on first launch). The installer is not code-signed, so Windows may show a SmartScreen warning: choose **More info → Run anyway**.
 
-**Usage:** drag videos or images into the window, compare presets in the preview (drag the divider or press **space**), then choose **Process**. Video processing can be paused and resumed. The result `Name [Remaster].mkv` is saved next to the original with all audio tracks, subtitles and chapters. For old photos, the program can remove scratches and dust, colorize black-and-white photos and restore faces (models are downloaded on first use). Power use (**Full**, **Balanced**, **Quiet**) in the bottom bar limits how hard the graphics card works, keeping the computer cooler and quieter at the cost of longer processing; it can be changed while processing.
+**Usage:** drag videos or images into the window, compare presets in the preview (drag the divider or press **space**), then choose **Process**. Video processing can be paused and resumed. The result `Name [Remaster].mkv` is saved next to the original with all audio tracks, subtitles and chapters. For old photos, the program can remove scratches and dust, colorize black-and-white photos and restore faces (models are downloaded on first use). Updates are checked from GitHub on startup; **Update now** in the top bar downloads, verifies and installs a new version and restarts the program, continuing any unfinished processing. Power use (**Full**, **Balanced**, **Quiet**) in the bottom bar limits how hard the graphics card works, keeping the computer cooler and quieter at the cost of longer processing; it can be changed while processing.
 
 **Images:** JPEG, PNG, WebP, BMP and TIFF, enlarged 2×, 4× (the AI runs twice) or to fit the screen. JPEGs are saved as `Name [Remaster].jpg`, others as `.png`. Photo orientation is corrected, EXIF data and color profiles are kept, and PNG transparency is preserved. Images are processed alongside videos, up to 64 megapixels.
 

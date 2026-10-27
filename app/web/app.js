@@ -78,6 +78,7 @@ async function hae() {
     }
   } catch (e) { /* palvelin käynnistyy tai sulkeutuu */ }
   const kiire = TILA && (TILA.ymparisto.asennus.kaynnissa || TILA.jono.kasiteltava ||
+    ["ladataan", "asennetaan"].includes((TILA.paivitys || {}).tila) ||
     TILA.jono.tyot.some(x => ["analysoidaan", "kasitellaan"].includes(x.tila) || ["jonossa", "kaynnissa"].includes(x.koe?.tila) || ["jonossa", "kaynnissa"].includes(x.liike?.tila)));
   setTimeout(hae, kiire ? 600 : 1500);
 }
@@ -128,6 +129,7 @@ function piirra() {
   piirraJono();
   piirraTyo();
   piirraAlapalkki();
+  piirraPaivitys();
   ilmoitaValmiit();
 }
 
@@ -827,6 +829,39 @@ function piirraAlapalkki() {
   $("#teho-rivi").title = t("teho.vihje." + te.value);
 }
 
+/* ------------------------------------------------------------ päivitys */
+function piirraPaivitys() {
+  const p = TILA.paivitys || {}, nappi = $("#paivitys-nappi");
+  const nakyy = ["saatavilla", "ladataan", "asennetaan", "virhe_lataus"].includes(p.tila);
+  nappi.hidden = !nakyy;
+  if (nakyy) nappi.textContent = p.tila === "ladataan" ? t("paivitys.ladataan_lyhyt", {p: Math.round(100 * (p.edistys || 0))})
+    : p.tila === "asennetaan" ? t("paivitys.asennetaan_lyhyt") : t("paivitys.saatavilla", {v: esc(p.versio || "")});
+  if ($("#paivitys").open) piirraPaivitysDialogi();
+}
+function piirraPaivitysDialogi() {
+  const p = TILA.paivitys || {};
+  $("#paivitys-otsikko").textContent = t("paivitys.otsikko", {v: p.versio || ""});
+  const rivit = ((p.muutokset || {})[KIELI === "fi" ? "fi" : "en"] || []);
+  const kaynnissa = TILA.jono.kasiteltava || TILA.jono.kasiteltava_kuva || TILA.jono.tyot.some(x => x.tila === "jonossa");
+  let h = rivit.map(r => `<p class="muutos"><b>${esc(r.versio)}</b> – ${esc(r.teksti)}</p>`).join("");
+  if (p.tila === "ladataan") h += `<p class="huom">${t("paivitys.ladataan", {p: Math.round(100 * (p.edistys || 0))})}</p><div class="edistys"><i style="width:${(100 * (p.edistys || 0)).toFixed(1)}%"></i></div>`;
+  else if (p.tila === "asennetaan") h += `<p class="huom">${t("paivitys.asennetaan")}</p>`;
+  else {
+    if (p.tila === "virhe_lataus") h += `<p class="huom virhe">${t("paivitys.virhe")}</p>`;
+    h += `<p class="huom">${t(kaynnissa ? "paivitys.selite_kaynnissa" : "paivitys.selite")}</p>`;
+  }
+  const s = $("#paivitys-sisalto");
+  if (s.dataset.html !== h) { s.innerHTML = h; s.dataset.html = h; }
+  const a = $("#paivitys-aloita");
+  a.disabled = ["ladataan", "asennetaan"].includes(p.tila);
+  a.textContent = t(p.tila === "virhe_lataus" ? "paivitys.yrita" : "paivitys.paivita");
+  $("#paivitys-myohemmin").hidden = p.tila === "asennetaan";
+}
+function avaaPaivitys() {
+  piirraPaivitysDialogi();
+  if (!$("#paivitys").open) $("#paivitys").showModal();
+}
+
 /* ------------------------------------------------------------ asetukset-dialogi */
 function avaaAsetukset() {
   const a = TILA.jono.asetukset, k = TILA.jono.kohde;
@@ -837,15 +872,24 @@ function avaaAsetukset() {
   $("#ulos-kansio").textContent = a.ulos_kansio || t("asetukset.ei_kansiota");
   $$('input[name="kieli"]').forEach(r => { r.checked = r.value === (a.kieli || "auto"); });
   const y = TILA.ymparisto, it = y.itsetesti || {};
-  $("#tietoja-sisalto").innerHTML = `<p>${t("tietoja.versio", {v: esc(TILA.versio)})}<br>${t("tietoja.gpu", {g: esc((y.gpu && y.gpu.nimi) || "–")})}<br>${t("tietoja.data", {p: esc(TILA.datakansio)})}</p>
+  const pv = TILA.paivitys || {};
+  const pvTeksti = pv.tila === "ei_kaytossa" ? "" : pv.tila === "saatavilla" ? ` · <a href="#" id="tietoja-paivitys">${t("paivitys.saatavilla", {v: esc(pv.versio || "")})}</a>`
+    : pv.tila === "ajan_tasalla" ? ` · ${t("paivitys.ajan_tasalla")}` : pv.tila === "virhe_tarkistus" ? ` · ${t("paivitys.ei_yhteytta")}` : "";
+  $("#tietoja-sisalto").innerHTML = `<p>${t("tietoja.versio", {v: esc(TILA.versio)})}${pvTeksti}<br>${t("tietoja.gpu", {g: esc((y.gpu && y.gpu.nimi) || "–")})}<br>${t("tietoja.data", {p: esc(TILA.datakansio)})}</p>
     <p>${t("tietoja.lisenssit")}</p><ul>
     <li>2xLiveActionV1_SPAN – jcj83429 (Apache 2.0)</li><li>2xVHS2HD – asterixcool (CC BY-SA 4.0)</li>
     <li>2x_AniSD_AC_G6i2b_SPAN – Sirosky (CC BY-NC 4.0)</li><li>PyTorch (BSD), NumPy (BSD), pywebview (BSD)</li>
     <li>FFmpeg (GPL, ladataan erikseen / downloaded separately)</li><li>Barlow-kirjasin / typeface – Jeremy Tribby (OFL)</li></ul>`;
+  $("#tietoja-paivitys")?.addEventListener("click", e => { e.preventDefault(); $("#asetukset").close(); avaaPaivitys(); });
   $("#asetukset").showModal();
 }
 function kytkeAsetukset() {
   $("#asetukset-nappi").addEventListener("click", avaaAsetukset);
+  $("#paivitys-nappi").addEventListener("click", avaaPaivitys);
+  $("#paivitys-aloita").addEventListener("click", async () => {
+    await api("paivita").catch(() => null);
+    hae_kerran();
+  });
   $("#asetukset").addEventListener("change", async e => {
     const el = e.target;
     if (el.name === "kohde") await api("asetukset", {kohde: el.value});

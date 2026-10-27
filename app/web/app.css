@@ -307,3 +307,13 @@ button,input,select{font:inherit;color:inherit}
 @media (max-width:1180px){.paa{grid-template-columns:250px 1fr}.tyoalue{grid-template-columns:minmax(0,1fr) 270px}}
 @media (max-height:760px){.tyo{padding-top:12px;gap:10px}.tyo-otsikko h1{font-size:20px}.painike.iso{padding:9px 18px;font-size:15px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* päivitys */
+.ylapalkki-oikea{display:flex;align-items:center;gap:10px}
+.paivitys-nappi{background:transparent;border-color:var(--syaani);color:var(--syaani)}
+.paivitys-nappi:hover{background:rgba(70,200,200,.12)}
+.paivitys-sisalto{font-size:14px;color:var(--himmea);max-height:46vh;overflow:auto}
+.paivitys-sisalto .muutos{margin:0 0 10px}
+.paivitys-sisalto .muutos b{color:var(--teksti);font-weight:600}
+.paivitys-sisalto .huom{color:var(--teksti);margin:12px 0 0}
+.paivitys-sisalto .virhe{color:#F0A29D}
