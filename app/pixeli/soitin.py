@@ -196,13 +196,97 @@ def rtx_suodin(an, kohde_korkeus):
     return "@rtx:d3d11vpp=" + ":".join(osat)
 
 
-def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi):
-    syote = kansio() / "pixeli_input.conf"
-    syote.parent.mkdir(parents=True, exist_ok=True)
-    syote.write_text('n vf toggle @rtx ; show-text "RTX-parannus päälle / pois"\n', encoding="utf-8")
+RTX_TEKSTIT = {
+    "fi": {"paalla": "RTX-parannus PÄÄLLÄ", "pois": "RTX-parannus POIS", "tavallinen": "tavallinen skaalaus",
+           "ei_tukea": "RTX-parannus ei käytössä: näytönohjain tai ajuri ei tue sitä. Toistetaan ilman parannusta.",
+           "ohje": "N vaihtaa", "ei_tarvetta": "Video on jo näytön kokoinen: RTX-parannukselle ei ole suurennettavaa."},
+    "en": {"paalla": "RTX enhancement ON", "pois": "RTX enhancement OFF", "tavallinen": "regular scaling",
+           "ei_tukea": "RTX enhancement unavailable: the graphics card or driver doesn't support it. Playing without it.",
+           "ohje": "N toggles", "ei_tarvetta": "The video already matches the screen size: nothing for RTX enhancement to upscale."},
+}
+
+_RTX_LUA = r"""-- PixeliRemaster: RTX Video Super Resolution päälle/pois ja tilan näyttö
+local mp = require "mp"
+local SUODIN = %(suodin)s
+local SKAALA = %(skaala)s
+local T = %(tekstit)s
+local paalla = true
+local alku_kerrottu = false
+
+local function koko(p)
+    local v = mp.get_property_native(p)
+    if v and v.w and v.h then return v.w, v.h end
+    return nil
+end
+
+-- parannus on käytössä, kun soittimen suodin on suurentanut kuvan (lähde -> ulostulo)
+local function kerro(alussa)
+    local lw, lh = koko("video-params")
+    local ow, oh = koko("video-out-params")
+    if not lw or not ow then return false end
+    local skaalattu = (oh > lh * 1.05)
+    local teksti
+    if SKAALA < 1.05 then
+        teksti = T.ei_tarvetta
+    elseif paalla and skaalattu then
+        teksti = string.format("%%s  ·  %%d×%%d → %%d×%%d  ·  %%s", T.paalla, lw, lh, ow, oh, T.ohje)
+    elseif paalla then
+        teksti = T.ei_tukea
+    else
+        teksti = string.format("%%s  ·  %%d×%%d, %%s  ·  %%s", T.pois, lw, lh, T.tavallinen, T.ohje)
+    end
+    mp.msg.info("RTX-tila: " .. (paalla and (skaalattu and "paalla" or "ei_kaytossa") or "pois"))
+    mp.osd_message(teksti, alussa and 5 or 3)
+    return true
+end
+
+local function kerro_pian(alussa)
+    -- ulostulon koko päivittyy vasta, kun suodinketju on rakennettu uudelleen
+    local yritykset = 0
+    local function yrita()
+        yritykset = yritykset + 1
+        if not kerro(alussa) and yritykset < 20 then mp.add_timeout(0.25, yrita) end
+    end
+    mp.add_timeout(0.4, yrita)
+end
+
+mp.add_key_binding("n", "pixeli-rtx", function()
+    if paalla then
+        mp.command("vf remove @rtx")
+    else
+        mp.commandv("vf", "add", SUODIN)
+    end
+    paalla = not paalla
+    kerro_pian(false)
+end)
+
+mp.register_event("playback-restart", function()
+    if not alku_kerrottu then
+        alku_kerrottu = true
+        kerro_pian(true)
+    end
+end)
+"""
+
+
+def _lua_jono(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def rtx_skripti(suodin, kieli="fi"):
+    t = RTX_TEKSTIT.get(kieli, RTX_TEKSTIT["en"])
+    taulu = "{" + ", ".join(f"{k} = {_lua_jono(v)}" for k, v in t.items()) + "}"
+    r = re.search(r"scale=([0-9.]+)", suodin)
+    return _RTX_LUA % {"suodin": _lua_jono(suodin), "tekstit": taulu, "skaala": r.group(1) if r else "1"}
+
+
+def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi"):
+    suodin = rtx_suodin(an, kohde_korkeus)
+    skripti = kansio() / "pixeli_rtx.lua"
+    skripti.parent.mkdir(parents=True, exist_ok=True)
+    skripti.write_text(rtx_skripti(suodin, kieli), encoding="utf-8")
     return [mpv_exe(), *_yhteiset(f"{nimi} – reaaliaikainen parannus"), "--hwdec=d3d11va", "--gpu-api=d3d11",
-            "--vo=gpu-next", f"--vf={rtx_suodin(an, kohde_korkeus)}", f"--input-conf={syote}",
-            "--osd-playing-msg=RTX-parannus päällä – N vaihtaa päälle/pois", "--", str(alkuperainen)]
+            "--vo=gpu-next", f"--vf={suodin}", f"--script={skripti}", "--", str(alkuperainen)]
 
 
 def kaynnista(cmd):

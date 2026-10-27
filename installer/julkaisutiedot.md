@@ -1,3 +1,6 @@
+**Korjattu 1.7.2:** Katso nyt -toistossa näkyy nyt selvästi, onko RTX-parannus päällä: toiston alussa ja N-näppäimellä soitin kertoo tilan ja suurennuksen (esim. 720×576 → 1800×1440). Jos näytönohjain tai ajuri ei tue parannusta, soitin kertoo senkin.
+**Fixed in 1.7.2:** Watch now playback clearly shows whether RTX enhancement is on: at the start and when pressing N, the player shows the state and the upscaling (e.g. 720×576 → 1800×1440). If the graphics card or driver doesn't support it, the player says so.
+
 **Uutta 1.7.1:** Asetuksissa uusi kohta **Soitin ja videotyökalut**: näet mpv:n ja ffmpegin versiot ja voit päivittää ne uusimpiin yhdellä painalluksella, kun mitään ei käsitellä. Uudet versiot vaihdetaan vasta onnistuneen latauksen jälkeen, joten epäonnistuminen ei riko vanhoja.
 **New in 1.7.1:** a new **Player and video tools** section in Settings shows the mpv and ffmpeg versions and updates them to the latest with one click when nothing is being processed. New versions replace the old ones only after a successful download, so a failure leaves the old ones working.
 

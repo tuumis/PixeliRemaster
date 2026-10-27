@@ -159,6 +159,8 @@ assert _lv.turvallinen_nimi('Elokuva: "Paluu"?') == "Elokuva Paluu"
 _g = _so.vertailusuodin({"leveys": 720, "korkeus": 576, "lomitus": "lomitettu"}, {"rajaus": [0, 72, 720, 432], "ow": 2560, "oh": 1440})
 assert "[vid2]bwdif" in _g and "crop=720:432:0:72" in _g and _g.endswith("[aid1]anull[ao]"), _g
 assert _so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440) == "@rtx:d3d11vpp=deint=yes:interlaced-only=yes:scale=2.5:scaling-mode=nvidia"
+_lua = _so.rtx_skripti(_so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440), "fi")
+assert 'local SKAALA = 2.5' in _lua and "RTX-parannus PÄÄLLÄ" in _lua and "%%" not in _lua and _lua.count("(") == _lua.count(")")
 print("levy ja soitin OK")
 
 ymp = asennus.Ymparisto()

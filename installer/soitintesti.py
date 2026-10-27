@@ -30,7 +30,8 @@ assert "scaling-mode" in apu.stdout and "nvidia" in apu.stdout, "d3d11vpp ei tun
 alkup, remaster = data / "alkup.mkv", data / "remaster.mkv"
 an = {"leveys": 720, "korkeus": 576, "lomitus": "lomitettu"}
 geo = {"rajaus": [0, 72, 720, 432], "ow": 1280, "oh": 720}
-testi = ["--vo=null", "--ao=null", "--frames=20", "--keep-open=no", "--force-window=no", "--msg-level=all=warn"]
+testi = ["--vo=null", "--ao=null", "--frames=40", "--keep-open=no", "--force-window=no",
+         "--msg-level=all=warn,pixeli_rtx=info"]
 for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
                   ("vertaa", soitin.komento_vertaa(remaster, alkup, an, geo, "testi")),
                   ("reaaliaika", soitin.komento_reaaliaika(alkup, an, 1440, "testi"))):
@@ -43,8 +44,9 @@ for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
     if p.returncode != 0 and nimi != "reaaliaika":
         print(f"::error title=soitintesti {nimi}::{loki[-800:].replace(chr(10), '%0A')}")
     if nimi == "reaaliaika":
-        # pilvikoneessa ei ole NVIDIA-näytönohjainta: riittää, että asetukset hyväksytään
+        # pilvikoneessa ei ole NVIDIA-näytönohjainta: asetukset hyväksytään ja tilaskripti ajetaan loppuun
         assert "Error parsing option" not in loki and "not found" not in loki.lower(), loki
+        assert "lua error" not in loki.lower() and "RTX-tila:" in loki, loki
     else:
         assert p.returncode == 0, loki
 # päivitys asetuksista: avoin soitin estää vaihdon eikä riko vanhaa versiota

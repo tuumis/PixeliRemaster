@@ -200,7 +200,9 @@ class Sovellus:
             tee = lambda: soitin.komento_vertaa(tulos, t["polku"], an, geo, nimi)  # noqa: E731
         else:
             korkeus = j.kohde()[1]
-            tee = lambda: soitin.komento_reaaliaika(t["polku"], an or {}, korkeus, nimi)  # noqa: E731
+            k = j.asetukset.get("kieli") or "auto"
+            kieli = self.kieli_jarjestelma if k == "auto" else k
+            tee = lambda: soitin.komento_reaaliaika(t["polku"], an or {}, korkeus, nimi, kieli)  # noqa: E731
         return soitin.varmista_ja_kaynnista(tee)
 
     def media(self, tid, suhteellinen):
