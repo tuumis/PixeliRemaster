@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.5.0"
+VERSIO = "1.6.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -420,6 +420,43 @@ def suodin_kuva(an):
 _KOODAIN = {}
 
 
+# ------------------------------------------------------------ tehonkäyttö
+# Näytönohjaimen käyttöaste rajoitetaan pitämällä laskentaerien välissä tauko: jos erä vei t sekuntia,
+# taukoa pidetään t·(1/osuus − 1). Keskimääräinen teho (ja lämpö ja tuulettimien ääni) laskee
+# samassa suhteessa, käsittely kestää 1/osuus kertaa pidempään. Tason voi vaihtaa kesken käsittelyn.
+TEHOTASOT = {"taysi": 1.0, "tasapaino": 0.65, "hiljainen": 0.4}
+_TEHO = {"taso": "taysi"}
+
+
+def aseta_teho(taso):
+    _TEHO["taso"] = taso if taso in TEHOTASOT else "taysi"
+    # rajoitetulla tasolla ohjelma (ja sen käynnistämät ffmpegit) väistää muita ohjelmia
+    if os.name == "nt":
+        try:
+            import ctypes
+            luokka = 0x20 if _TEHO["taso"] == "taysi" else 0x4000     # NORMAL / BELOW_NORMAL_PRIORITY_CLASS
+            k32 = ctypes.windll.kernel32
+            k32.SetPriorityClass(k32.GetCurrentProcess(), luokka)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def teho_osuus():
+    return TEHOTASOT[_TEHO["taso"]]
+
+
+def tehotauko(kesto, peruuta=None):
+    """Tauko laskentaerän jälkeen valitun tehotason mukaan (keskeytys katkaisee tauon)."""
+    s = teho_osuus()
+    if s >= 1.0 or kesto <= 0:
+        return
+    tauko = min(10.0, kesto * (1.0 / s - 1.0))
+    if peruuta is not None:
+        peruuta.wait(tauko)
+    else:
+        time.sleep(tauko)
+
+
 def koodain(muoto, pieni=False):
     """Valitsee parhaan toimivan koodaimen (NVENC näytönohjaimella, varalla prosessori).
     pieni=True: noin puolet pienempi tiedosto, hieman pehmeämpi rae."""
@@ -454,7 +491,7 @@ def koodain(muoto, pieni=False):
 
 
 def aja_osa(src, an, geo, ketju, ops, ulos, alku, maara, muoto, lokit, png=None, edistys=None, era=2,
-            peruuta=None, pikkukuva=None, pieni=False):
+            peruuta=None, pikkukuva=None, pieni=False, rajoita=True):
     """Purkaa `maara` kuvaa kohdasta `alku`, käsittelee ja koodaa tiedostoon. Palauttaa kuvamäärän."""
     R = Fraction(an["R"])
     x, y, cw, ch = geo["rajaus"]
@@ -584,8 +621,11 @@ def aja_osa(src, an, geo, ketju, ops, ulos, alku, maara, muoto, lokit, png=None,
                     kuvat.append(k)
                 if not kuvat:
                     break
+                t_era = time.perf_counter()
                 xb = ops.from_uint8(np.stack(kuvat))
                 valmiit(ketju.syota(xb) if ajallinen else ketju.rgb_lopullinen(xb, alku + n))
+                if rajoita:
+                    tehotauko(time.perf_counter() - t_era, peruuta)
             if ajallinen and not virheet:
                 valmiit(ketju.loppu())
         normaali = True
@@ -1275,7 +1315,8 @@ def liikepatka(src, an, geo, wd, L, n, saato, edistys=None, peruuta=None, kesto=
         ketju = L.ketju(geo, n, saato, an)
         tmp = kd / (nimi + ".tmp.mp4")
         aja_osa(src, an, geo, ketju, L.ops, tmp, int(kohta * R), maara, "h264", wd / "lokit",
-                edistys=(lambda m: edistys(m, maara)) if edistys else None, peruuta=peruuta)
+                edistys=(lambda m: edistys(m, maara)) if edistys else None, peruuta=peruuta,
+                    rajoita=False)
         tmp.replace(kd / nimi)
     return f"koe_{tun}/{nimi}"
 
@@ -1318,7 +1359,7 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
         except OSError:
             pass
     maarat = meta["maarat"]
-    tila = {"t0": time.time(), "n_alku": sum(maarat.values()), "viim": 0.0}
+    tila = {"viim": 0.0, "historia": [(time.time(), sum(maarat.values()))]}
 
     with L.lukko:
         ketju = L.ketju(geo, n, saato, an)
@@ -1336,7 +1377,12 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
                         return
                     tila["viim"] = nyt
                     tehty = pohja + m
-                    nop = (tehty - tila["n_alku"]) / max(1e-6, nyt - tila["t0"])
+                    # nopeus viimeisen minuutin ajalta: tehotason vaihto näkyy arviossa nopeasti
+                    h = tila["historia"]
+                    h.append((nyt, tehty))
+                    while len(h) > 2 and nyt - h[1][0] >= 60:
+                        h.pop(0)
+                    nop = (tehty - h[0][1]) / max(1e-6, nyt - h[0][0])
                     edistys({"tehty": tehty, "kaikki": arvio, "nopeus": round(nop, 2),
                              "jaljella_s": (arvio - tehty) / nop if nop > 0 else None})
 

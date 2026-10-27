@@ -224,6 +224,33 @@ def harmaasavy(rgb_u8):
 HARMAA_RAJA = 2.5            # tätä pienempi: kuva on todennäköisesti mustavalkoinen tai seepia
 
 
+# Värien hillintä. DDColor arvaa välillä liian kirkkaita värejä (violetti verho, sateenkaariliukuma
+# valkoisessa paidassa, neonvalot). Siksi:
+#  - kuva väritetään myös peilattuna ja tulokset keskiarvotetaan: kun malli on epävarma, arvaukset
+#    eroavat ja keskiarvo jää hillitymmäksi, varmat värit (iho, kasvillisuus, taivas) säilyvät;
+#  - värikylläisyys rajoitetaan pehmeästi: POLVI asti ennallaan, sen yli loivenee kohti MAKSIMIa;
+#  - hyvin vaaleissa ja hyvin tummissa kohdissa värejä vähennetään (valkoinen paita pysyy valkoisena).
+POLVI, MAKSIMI = 28.0, 48.0
+VALO = (80.0, 96.0, 0.25)          # L alkaen, L täysi, jäljelle jäävä osuus
+VARJO = (6.0, 22.0, 0.5)
+
+
+def _pehmea(t):
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def hillitse(L, ab):
+    """L (h, w), ab (h, w, 2) -> hillitty ab."""
+    C = np.hypot(ab[..., 0], ab[..., 1]) + 1e-6
+    k = np.where(C <= POLVI, 1.0, (POLVI + (MAKSIMI - POLVI) * np.tanh((C - POLVI) / (MAKSIMI - POLVI))) / C)
+    a0, a1, am = VALO
+    k = k * (1.0 - (1.0 - am) * _pehmea((L - a0) / (a1 - a0)))
+    b0, b1, bm = VARJO
+    k = k * (1.0 - (1.0 - bm) * _pehmea((b1 - L) / (b1 - b0)))
+    return ab * k[..., None].astype(ab.dtype)
+
+
 def varita(o, net, rgb_u8, palaute=None):
     """Väritys: värit mallilta pienestä kuvasta, kirkkaus alkuperäisestä täydellä tarkkuudella."""
     h, w, _ = rgb_u8.shape
@@ -232,7 +259,11 @@ def varita(o, net, rgb_u8, palaute=None):
     pieni = np.clip(pieni.transpose(1, 2, 0), 0, 1)
     Lp = rgb_lab(pieni)[..., :1]
     harmaa = lab_rgb(np.concatenate([Lp, np.zeros_like(Lp), np.zeros_like(Lp)], -1)).astype(np.float32)
-    ab = o.numpy(net(o.tensor(harmaa.transpose(2, 0, 1)[None])))[0]
+    x = harmaa.transpose(2, 0, 1)[None]
+    ab = o.numpy(net(o.tensor(np.ascontiguousarray(x))))[0]
+    if palaute:
+        palaute(0.4)
+    ab = 0.5 * (ab + o.numpy(net(o.tensor(np.ascontiguousarray(x[..., ::-1]))))[0][..., ::-1])
     if palaute:
         palaute(0.7)
     Wy, Wx = kuva.skaalausmatriisi(KOKO, h, "catmullrom"), kuva.skaalausmatriisi(KOKO, w, "catmullrom")
@@ -241,5 +272,6 @@ def varita(o, net, rgb_u8, palaute=None):
     for y0 in range(0, h, 512):                 # Lab-muunnos kaistoittain (muisti)
         y1 = min(h, y0 + 512)
         L = rgb_lab(rgb[y0:y1])[..., :1]
-        tulos[y0:y1] = (np.clip(lab_rgb(np.concatenate([L, ab[y0:y1]], -1)), 0, 1) * 255.0 + 0.5).astype(np.uint8)
+        abk = hillitse(L[..., 0], ab[y0:y1])
+        tulos[y0:y1] = (np.clip(lab_rgb(np.concatenate([L, abk], -1)), 0, 1) * 255.0 + 0.5).astype(np.uint8)
     return tulos

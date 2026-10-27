@@ -304,9 +304,19 @@ def _pikkukuva(polku, rgb, alfa=None, koko=(192, 120)):
     m.tallenna_png(polku, (pieni + 0.5).astype(np.uint8))
 
 
+def on_piirros(otos, varit, harmaa, haviollinen):
+    """Piirros tai grafiikka: häviöttömässä värikuvassa vähän eri värejä. Mustavalkoisessa kuvassa
+    värejä on aina vähän: piirroksen tuntee siitä, että lähes kaikki on paperia tai mustetta
+    (vähän välisävyjä); valokuvassa välisävyjä on paljon."""
+    if harmaa:
+        y = otos.mean(1)
+        return bool(((y > 40) & (y < 215)).mean() < 0.2)
+    return bool(not haviollinen and varit < min(20000, 0.15 * len(otos)))
+
+
 def analysoi_kuva(src: Path, wd: Path):
     st = src.stat()
-    avain = [st.st_size, int(st.st_mtime), m.VERSIO, "kuva", 4]
+    avain = [st.st_size, int(st.st_mtime), m.VERSIO, "kuva", 5]
     vanha = m.lue_json(wd / "analyysi.json")
     if vanha and vanha.get("avain") == avain and (wd / "pikku.png").exists() and (wd / "yleis.png").exists():
         return vanha
@@ -350,7 +360,9 @@ def analysoi_kuva(src: Path, wd: Path):
     otos = rgb[::askel, ::askel].reshape(-1, 3).astype(np.uint32)
     varit = int(np.unique((otos[:, 0] << 16) | (otos[:, 1] << 8) | otos[:, 2]).size)
     haviollinen = koodekki in ("mjpeg", "webp", "heic")
-    if not haviollinen and varit < min(20000, 0.15 * len(otos)):
+    from . import vari
+    harmaa = vari.harmaasavy(rgb) < vari.HARMAA_RAJA
+    if on_piirros(otos, varit, harmaa, haviollinen):
         tyyppi, suositus = "piirros", 5
     elif (laatu is not None and laatu < 86) or max(w, h) <= 900:
         tyyppi, suositus = "pakattu", 3
@@ -358,8 +370,6 @@ def analysoi_kuva(src: Path, wd: Path):
         tyyppi, suositus = "valokuva", 2
     if max(w, h) >= 3000:
         huomiot.append("kuva_suuri")
-    from . import vari
-    harmaa = vari.harmaasavy(rgb) < vari.HARMAA_RAJA
     muoto = {"mjpeg": "jpeg"}.get(koodekki, koodekki)
     d = {"laji": "kuva", "avain": avain, "lahde": str(src), "leveys": w, "korkeus": h,
          "leveys_raaka": w0, "korkeus_raaka": h0, "suunta": suunta, "alfa_mahd": an["alfa_mahd"],
@@ -516,6 +526,25 @@ def _tallenna_esikatselu(polku, kd, i, rgb_u8, _valimuisti={}):
     m.tallenna_png(polku, rgb_u8)
 
 
+def _alkuperaiset(src, an, geo, kd, L, alueet, ks, ol):
+    """Kun kuvaa korjataan (naarmut, väritys), vertailun vasemmalle puolelle tehdään korjaamaton
+    alkuperäinen samasta alueesta: muuten Alkuperäinen-puolella näkyisi jo väritetty kuva."""
+    if not _korjaukset(geo):
+        return
+    rgb, _ = pura(src, an)
+    rgb = kaanna(rgb, geo.get("kierto", 0))
+    for k in ks:
+        x, y, aw, ah = alueet[k - 1]
+        osa = np.ascontiguousarray(rgb[y:y + ah, x:x + aw])[None]
+        oh, ow = _alue_koko(alueet[k - 1], geo)
+        with L.lukko, L.inferenssi():
+            ketju = kuva.Ketju(L.ops, ah, aw, oh, ow, asetus_kuva(L, 1, ol.get("1"), geo), yuv=False)
+            r = ketju.rgb_lopullinen(L.ops.from_uint8(osa), 1000 * k)
+            _tallenna_esikatselu(kd / f"a_k{k}.png", kd, k, L.ops.uint8_hwc(r))
+            del r, ketju
+            L.tyhjenna()
+
+
 def mittaa_kuva(src, an, geo, wd):
     """Kuvan laadun mittaus ja siihen sovitetut säädöt (välimuistissa)."""
     from . import mittaus
@@ -569,8 +598,9 @@ def koekuvat_kuva(src, an, geo, wd, L, edistys=None, peruuta=None):
         mitattu = min(ajat[1:]) if len(ajat) > 1 else ajat[0]
         suhde = (geo["rajaus"][2] * geo["rajaus"][3]) / max(1, alueet[0][2] * alueet[0][3])
         aika[str(n)] = round(mitattu * suhde * (1.1 if suhde > 1.5 else 1.0) + geo["ow"] * geo["oh"] / 12e6, 1)
+    _alkuperaiset(src, an, geo, kd, L, alueet, range(1, len(alueet) + 1), ol)
     tiedot = {"tunniste": tun, "aika": aika, "alueet": alueet, "aika_luotu": time.time(), "mittaus": mt["mittaus"],
-              "kuvaus": mt["kuvaus"], "oletukset": ol}
+              "kuvaus": mt["kuvaus"], "oletukset": ol, "alkuperainen": bool(_korjaukset(geo))}
     m.kirjoita_json(kd / "koe.json", tiedot)
     return tiedot
 
@@ -600,6 +630,7 @@ def siirra_alue(src, an, geo, wd, L, k, cx, cy, edistys=None):
             L.tyhjenna()
         if edistys:
             edistys(j, len(m.KUVA_ASETUKSET))
+    _alkuperaiset(src, an, geo, kd, L, alueet, [k], ol)
     m.kirjoita_json(kd / "alueet.json", alueet)
     tiedot = m.lue_json(kd / "koe.json", {}) or {}
     tiedot["alueet"] = alueet

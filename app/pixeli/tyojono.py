@@ -37,7 +37,7 @@ class Jono:
         self.ymp = ymparisto
         self.lukko = threading.RLock()
         self.tyot = []
-        self.asetukset = {"kohde": "auto", "ulos_kansio": None, "kieli": "auto"}
+        self.asetukset = {"kohde": "auto", "ulos_kansio": None, "kieli": "auto", "teho": "taysi"}
         self.sammuta_valmiina = False
         self.sammutus_ajastettu = False
         self._peruuta = threading.Event()
@@ -64,6 +64,7 @@ class Jono:
     def _lataa(self):
         a = m.lue_json(m.DATA / "asetukset.json", {}) or {}
         self.asetukset.update({k: v for k, v in a.items() if k in self.asetukset})
+        m.aseta_teho(self.asetukset.get("teho"))
         d = m.lue_json(self._tiedosto(), {}) or {}
         for t in d.get("tyot", []):
             if t.get("tila") == "kasitellaan" or t.get("tila") == "jonossa":
@@ -93,9 +94,12 @@ class Jono:
 
     def tallenna_asetukset(self, uudet):
         with self.lukko:
-            for k in ("kohde", "ulos_kansio", "kieli"):
+            for k in ("kohde", "ulos_kansio", "kieli", "teho"):
                 if k in uudet:
                     self.asetukset[k] = uudet[k]
+            if "teho" in uudet:
+                m.aseta_teho(self.asetukset["teho"])
+                self.asetukset["teho"] = m._TEHO["taso"]
             m.kirjoita_json(m.DATA / "asetukset.json", self.asetukset)
             # kohderesoluutio vaikuttaa kaikkien aloittamattomien geometriaan
             for t in self.tyot:
@@ -406,7 +410,7 @@ class Jono:
                 elif t.get("arvio_nopeus") and t.get("analyysi"):
                     an = t["analyysi"]
                     from fractions import Fraction
-                    jaljella += an["kesto"] * float(Fraction(an["R"])) / t["arvio_nopeus"]
+                    jaljella += an["kesto"] * float(Fraction(an["R"])) / t["arvio_nopeus"] / m.teho_osuus()
             return {"tyot": tyot, "asetukset": self.asetukset, "kohde": list(self.kohde()),
                     "sammuta_valmiina": self.sammuta_valmiina, "sammutus_ajastettu": self.sammutus_ajastettu,
                     "jono_jaljella_s": jaljella if jonossa else None, "kasiteltava": self._kasiteltava,
@@ -674,7 +678,8 @@ class Jono:
                         if t.get("koe") is kohde:
                             t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"], "aika": tiedot["aika"],
                                         "alueet": tiedot["alueet"], "mittaus": tiedot.get("mittaus"),
-                                        "kuvaus": tiedot.get("kuvaus"), "oletukset": tiedot.get("oletukset")}
+                                        "kuvaus": tiedot.get("kuvaus"), "oletukset": tiedot.get("oletukset"),
+                                        "alkuperainen": tiedot.get("alkuperainen", False)}
                 elif laji == "koe":
                     tiedot = m.koekuvat(polku, an, geo, wd, L, edistys=ed)
                     with self.lukko:

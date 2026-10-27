@@ -114,7 +114,31 @@ def _luonto():
 assert mittaus.piirretty([_piirros() for _ in range(8)]) and not mittaus.piirretty([_luonto() for _ in range(8)])
 _mitat = [{"kohina": 0.3, "lohkot": 1.1, "teravyys": 0.5}] * 6 + [{"kohina": 0.3, "lohkot": 1.6, "teravyys": 0.5}]
 assert mittaus.vaihtelee(_mitat) and not mittaus.vaihtelee(_mitat[:6])
+# mustavalkoinen valokuva ei ole piirros (vähän värejä, mutta paljon välisävyjä); viivapiirros on
+_valo = np.repeat(_luonto().mean(2, keepdims=True), 3, 2).astype(np.uint32).reshape(-1, 3)
+_viiva = np.where(_r.random((240, 320, 1)) < 0.08, 10, 250).repeat(3, 2).astype(np.uint32).reshape(-1, 3)
+assert not kv.on_piirros(_valo, 200, True, False) and kv.on_piirros(_viiva, 2, True, False)
 print("piirretyn ja vaihtelun tunnistus OK")
+
+# tehonkäyttö: tauko erän jälkeen valitun tason mukaan
+import time as _t  # noqa: E402
+m.aseta_teho("hiljainen")
+_a = _t.perf_counter(); m.tehotauko(0.1); _k = _t.perf_counter() - _a
+assert 0.12 < _k < 0.4, _k
+m.aseta_teho("taysi")
+_a = _t.perf_counter(); m.tehotauko(0.1); assert _t.perf_counter() - _a < 0.02
+m.aseta_teho("outo")
+assert m.teho_osuus() == 1.0
+print("tehonkäyttö OK")
+
+# värien hillintä: keskisävyjen maltilliset värit ennallaan, ylikylläinen rajataan, valkoinen pysyy lähes valkoisena
+from pixeli import vari as _vr  # noqa: E402
+_L = np.array([[50.0, 50.0, 95.0]])
+_ab = np.array([[[15.0, 10.0], [60.0, 50.0], [30.0, -30.0]]])
+_h = _vr.hillitse(_L, _ab)
+_C = np.hypot(_h[..., 0], _h[..., 1])[0]
+assert np.allclose(_h[0, 0], _ab[0, 0]) and 40 < _C[1] < _vr.MAKSIMI and _C[2] < 15, _C
+print("värien hillintä OK")
 
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
@@ -127,6 +151,10 @@ html = urllib.request.urlopen(f"http://127.0.0.1:{sov.portti}/", timeout=10).rea
 assert sov.avain in html and "app.js" in html
 for f in ("app.js", "app.css", "kaannokset.js", "pixeli.svg", "fontit/Barlow-Regular.ttf"):
     assert urllib.request.urlopen(f"http://127.0.0.1:{sov.portti}/web/{f}", timeout=10).status == 200, f
+req = urllib.request.Request(f"http://127.0.0.1:{sov.portti}/api/asetukset", data=json.dumps({"teho": "tasapaino"}).encode(),
+                             headers={"X-Pixeli-Avain": sov.avain, "Content-Type": "application/json"}, method="POST")
+urllib.request.urlopen(req, timeout=10).read()
+assert m.teho_osuus() == 0.65 and jono.asetukset["teho"] == "tasapaino"
 print("Palvelin OK, versio", tila["versio"])
 print("SAVUTESTI OK")
 os._exit(0)

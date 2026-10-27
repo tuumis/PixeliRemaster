@@ -271,6 +271,8 @@ button,input,select{font:inherit;color:inherit}
 .yhteenveto strong{color:var(--teksti);font-weight:500}
 .valinta{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--himmea);cursor:pointer}
 .valinta input{accent-color:var(--syaani);width:16px;height:16px}
+.teho{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--himmea)}
+.teho select{background:var(--nosto);border:1px solid var(--viiva);border-radius:var(--r-pieni);padding:5px 8px;color:var(--teksti)}
 
 /* pudotus */
 .pudotus{position:fixed;inset:0;background:rgba(18,40,41,.86);display:grid;place-items:center;z-index:50;pointer-events:none}

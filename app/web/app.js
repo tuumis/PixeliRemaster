@@ -236,13 +236,15 @@ function oletusSaato(n, x) {
 }
 function kohtienMaara(x) { return onKuva(x) ? ((x.koe && x.koe.alueet) || [1]).length : 3; }
 function nykyinenAsetus(x) { return Number((x.valinta || {}).asetus || (x.analyysi || {}).suositus || 2); }
+const TEHO_OSUUS = {taysi: 1, tasapaino: 0.65, hiljainen: 0.4};   // sama kuin moottori.TEHOTASOT
 function arvioAika(x, n) {
   const an = x.analyysi; if (!an) return null;
   if (onKuva(x)) return (x.koe && x.koe.aika && x.koe.aika[String(n)]) ?? null;
   const kuvia = an.kesto * murto(an.R);
   const nop = x.koe && x.koe.nopeus && x.koe.nopeus[String(n)];
-  if (nop) return kuvia / (nop * 1.15);         // erissä hieman nopeampi kuin yksittäin mitattuna
-  if (n === nykyinenAsetus(x) && x.arvio_nopeus) return kuvia / x.arvio_nopeus;
+  const osuus = TEHO_OSUUS[(TILA.jono && TILA.jono.asetukset && TILA.jono.asetukset.teho) || "taysi"] || 1;
+  if (nop) return kuvia / (nop * 1.15) / osuus;         // erissä hieman nopeampi kuin yksittäin mitattuna
+  if (n === nykyinenAsetus(x) && x.arvio_nopeus) return kuvia / x.arvio_nopeus / osuus;
   return null;
 }
 
@@ -253,7 +255,7 @@ function tyoAllekirjoitus(x) {
     (x.valinta || {}).laatu, (x.valinta || {}).aanet, (x.valinta || {}).tekstit, (x.valinta || {}).ulkoiset, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
     (x.valinta || {}).naarmut, (x.valinta || {}).vari,
     x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika,
-    x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan,
+    x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan, (TILA.jono.asetukset || {}).teho,
     TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length]);
 }
 
@@ -500,7 +502,8 @@ function paneeliHtml(x, n, muokattava) {
         <label class="ruutu" title="${esc(t("vanha.naarmut_selite"))}"><input type="checkbox" id="naarmut" ${(x.valinta || {}).naarmut ? "checked" : ""} ${ei}> ${t("vanha.naarmut")}</label>
         <label class="ruutu" title="${esc(t("vanha.vari_selite"))}"><input type="checkbox" id="vari" ${(x.valinta || {}).vari ? "checked" : ""} ${ei}> ${t("vanha.vari")}</label>
       </span></div>
-      ${x.analyysi.harmaa && !(x.valinta || {}).vari ? `<p class="selite vihje-vari">${t("vanha.harmaa_vihje")}</p>` : ""}
+      ${x.analyysi.harmaa && x.analyysi.tyyppi === "piirros" ? `<p class="selite vihje-vari">${t("vanha.piirros_vihje")}</p>`
+        : x.analyysi.harmaa && !(x.valinta || {}).vari ? `<p class="selite vihje-vari">${t("vanha.harmaa_vihje")}</p>` : ""}
     </div>`;
   } else {
     const laatu = (x.valinta || {}).laatu || "";
@@ -554,7 +557,7 @@ function paivitaKuvat(x, viive = 0) {
   const k = x.koe; if (!k || k.tila !== "valmis") return;
   const nk = nakyma(x.id), n = nykyinenAsetus(x), tun = k.tunniste + "." + (k.versio || 0);
   const v = $("#kuva-v"), o = $("#kuva-o"); if (!v || !o) return;
-  v.src = media(x.id, `koe_${k.tunniste}/v1_k${nk.kohta}.png`, tun);
+  v.src = media(x.id, `koe_${k.tunniste}/${k.alkuperainen ? "a" : "v1"}_k${nk.kohta}.png`, tun);
   $("#lappu-o").textContent = saatoPoikkeaa(x, n, nk.saato) ? t("vertailu.saadot_lappu", {n: asetusNimi(x, n)}) : asetusNimi(x, n);
   $("#lappu-v").classList.toggle("nyt", nk.tila === "vuoro" && !nk.oikea);
   $("#lappu-o").classList.toggle("nyt", nk.tila === "vuoro" && nk.oikea);
@@ -819,6 +822,9 @@ function piirraAlapalkki() {
   else { nappi.textContent = t("jono.kasittele_kaikki"); nappi.className = "painike ensisijainen"; nappi.dataset.toiminto = "aloita"; nappi.disabled = !valmiina.length; }
   const s = $("#sammuta");
   if (document.activeElement !== s) s.checked = !!j.sammuta_valmiina;
+  const te = $("#teho");
+  if (document.activeElement !== te) te.value = (j.asetukset && j.asetukset.teho) || "taysi";
+  $("#teho-rivi").title = t("teho.vihje." + te.value);
 }
 
 /* ------------------------------------------------------------ asetukset-dialogi */
@@ -888,6 +894,13 @@ function kytke() {
   });
   $("#jono-nappi").addEventListener("click", async e => { await api(e.currentTarget.dataset.toiminto).catch(() => {}); hae_kerran(); });
   $("#sammuta").addEventListener("change", e => api("sammutus", {paalla: e.target.checked}));
+  $("#teho").addEventListener("change", async e => {
+    TILA.jono.asetukset.teho = e.target.value;
+    $("#teho-rivi").title = t("teho.vihje." + e.target.value);
+    await api("asetukset", {teho: e.target.value}).catch(() => null);
+    ilmoita(t("teho.vaihdettu." + e.target.value));
+    e.target.blur();
+  });
   $("#asennus-aloita").addEventListener("click", async e => { await api(e.currentTarget.dataset.toiminto).catch(() => {}); hae_kerran(); });
   $("#asennus-loki").addEventListener("click", () => api("avaa", {mita: "loki"}));
   $("#liike").addEventListener("close", () => { const v = $("#liike-video"); v.pause(); v.removeAttribute("src"); v.load(); });
