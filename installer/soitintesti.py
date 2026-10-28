@@ -34,7 +34,9 @@ testi = ["--vo=null", "--ao=null", "--frames=40", "--keep-open=no", "--force-win
          "--msg-level=all=warn,pixeli_rtx=info"]
 for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
                   ("vertaa", soitin.komento_vertaa(remaster, alkup, an, geo, "testi")),
-                  ("reaaliaika", soitin.komento_reaaliaika(alkup, an, 1440, "testi"))):
+                  ("reaaliaika", soitin.komento_reaaliaika(alkup, an, 1440, "testi")),
+                  ("oma", soitin.komento_oma(alkup, an, "testi")),
+                  ("oma_piirretty", soitin.komento_oma(alkup, an, "testi", piirretty=True))):
     cmd = [c for c in cmd if not str(c).startswith(("--force-window", "--keep-open"))]
     cmd = cmd[:-2] + testi + cmd[-2:]
     p = subprocess.run([str(c) for c in cmd], capture_output=True, text=True, encoding="utf-8", errors="replace",

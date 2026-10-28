@@ -26,6 +26,15 @@ Mallien arkkitehtuurit (SPAN, RealPLKSR) on toteutettu uudelleen tiedostossa `ap
 
 Muut arkkitehtuurit (DRUNet, RetinaFace, GFPGAN, RealBasicVSR, naarmujen tunnistuksen UNet, LaMa ja DDColor) on toteutettu uudelleen tiedostoissa `app/pixeli/kuva.py`, `kasvot.py`, `vsr.py`, `korjaus.py` ja `vari.py`; jokainen rakennus vertaa tuloksia alkuperäisiin toteutuksiin (`installer/torchtesti.py`). / The other architectures were reimplemented and every build compares them against the original implementations.
 
+## Soittimen suurennusvarjostimet / Player upscaling shaders (app/shaders)
+
+| Tiedosto / File | Tekijä / Author | Lisenssi / License | Lähde / Source |
+|---|---|---|---|
+| FSRCNNX_x2_16-0-4-1.glsl | igv | LGPL-3.0 (LICENSE-FSRCNNX-LGPL-3.0.txt, GPL-3.0.txt) | https://github.com/igv/FSRCNN-TensorFlow/releases/tag/1.1 |
+| Anime4K_*.glsl (Mode C HQ) | bloc97 | MIT (LICENSE-Anime4K-MIT.txt) | https://github.com/bloc97/Anime4K |
+
+Varjostimet ovat muuttamattomia. / The shaders are unmodified.
+
 ## Algoritmit / Algorithms
 
 - DeHalo_alpha – Didée (AviSynth/VapourSynth-yhteisö), toteutettu uudelleen.

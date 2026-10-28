@@ -1,3 +1,6 @@
+**Uutta 1.10.0:** Katso heti ja Katso levyltä parantavat kuvaa nyt oletuksena soittimen omalla tekoälyllä (FSRCNNX elokuville, Anime4K piirretyille). Se toimii aina, myös koko ruudun tilassa, eikä vaadi NVIDIAn Super Resolution -asetusta, joten sen voi pitää muissa ohjelmissa pois päältä. NVIDIAn RTX-parannuksen voi edelleen valita asetuksista. N vaihtaa parannuksen päälle ja pois.
+**New in 1.10.0:** Watch now and Watch from disc now enhance the picture by default with the player's own AI (FSRCNNX for movies, Anime4K for cartoons). It always works, also in full screen, and doesn't need NVIDIA's Super Resolution setting, so you can keep that off for other apps. NVIDIA RTX enhancement can still be chosen in Settings. N toggles the enhancement.
+
 **Korjattu 1.9.4:** tasaisempi toisto: soitin tahdistaa elokuvan näytön virkistystaajuuteen (esim. 144 Hz), joten liike ei nyi. Levyltä katsottaessa soitin lukee levyä pidemmälle eteenpäin.
 **Fixed in 1.9.4:** smoother playback: the player syncs the movie to the display refresh rate (e.g. 144 Hz), so motion no longer judders. When watching from a disc, the player reads further ahead.
 
