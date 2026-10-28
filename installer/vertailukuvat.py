@@ -20,7 +20,6 @@ os.environ.setdefault("PIXELI_DATA", str(ulos / "data"))
 from pixeli import kuva, moottori as m, soitin  # noqa: E402
 
 LAHDE = "https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4"
-KOHDAT = [("kasvot", 16.0, (300, 60)), ("maisema", 38.0, (200, 100))]
 CW, CH, K = 384, 288, 2.5
 OW, OH = int(CW * K), int(CH * K)
 
@@ -65,11 +64,47 @@ try:
     fontti = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 22)
 except Exception:  # noqa: BLE001
     fontti = ImageFont.load_default()
-for nimi, t, (x, y) in KOHDAT:
+def kehys(t):
     raaka = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", LAHDE, "-frames:v", "1", "-f", "rawvideo",
                             "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
-    kehys = np.frombuffer(raaka, np.uint8).reshape(480, 854, 3)
-    rajaus = np.ascontiguousarray(kehys[y:y + CH, x:x + CW])
+    return np.frombuffer(raaka, np.uint8).reshape(480, 854, 3)
+
+
+def paras_rajaus(k):
+    """Rajaus, jossa on eniten yksityiskohtia (kirkkaat, tarkat alueet)."""
+    y_ = k.astype(np.float32).mean(2)
+    g = np.abs(np.diff(y_, axis=1))[:-1] + np.abs(np.diff(y_, axis=0))[:, :-1]
+    paras, arvo = (0, 0), -1
+    for yy in range(0, 480 - CH, 16):
+        for xx in range(0, 854 - CW, 16):
+            a = y_[yy:yy + CH, xx:xx + CW]
+            if a.mean() < 60:
+                continue
+            v = float(g[yy:yy + CH, xx:xx + CW].mean())
+            if v > arvo:
+                paras, arvo = (xx, yy), v
+    return paras, arvo
+
+
+ehdokkaat = []
+for t in range(3, 52, 3):
+    try:
+        k = kehys(t)
+    except subprocess.CalledProcessError:
+        continue
+    (x, y), arvo = paras_rajaus(k)
+    ehdokkaat.append((arvo, t, x, y, k))
+ehdokkaat.sort(key=lambda e: -e[0])
+valitut = []
+for e in ehdokkaat:
+    if all(abs(e[1] - v[1]) >= 8 for v in valitut):
+        valitut.append(e)
+    if len(valitut) == 2:
+        break
+for j, (arvo, t, x, y, k) in enumerate(valitut, 1):
+    nimi = f"kohta{j}"
+    print(nimi, "aika", t, "rajaus", x, y, "yksityiskohdat", round(arvo, 1))
+    rajaus = np.ascontiguousarray(k[y:y + CH, x:x + CW])
     lahde = ulos / f"{nimi}_lahde.png"
     Image.fromarray(rajaus).save(lahde)
     kuvat = [("Tavallinen skaalaus", kuvakaappaus(lahde, ulos / f"{nimi}_tavallinen.png", [])),
