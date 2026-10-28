@@ -1,3 +1,6 @@
+**Korjattu 1.9.1:** ohjelma avautuu suoraan normaaliin näkymään. Käynnistystarkistus tehdään taustalla, eikä "Valmistellaan ensimmäistä käyttöä" -näkymä enää vilahda jokaisella käynnistyksellä (se näytetään vain päivityksen jälkeen tai jos tarkistus löytää ongelman).
+**Fixed in 1.9.1:** the program opens straight to the normal view. The startup check runs in the background, and the "Preparing for first use" screen no longer flashes on every start (it appears only after an update or if the check finds a problem).
+
 **Uutta 1.9.0:** **Katso levyltä**: DVD:n tai Blu-rayn voi katsoa suoraan levyltä ilman kopiointia. MakeMKV välittää valitun nimikkeen soittimeen, ja kuva paranee toiston aikana NVIDIAn RTX Video Super Resolutionilla (N vaihtaa päälle/pois). Toisto alkaa noin puolessa minuutissa.
 **New in 1.9.0:** **Watch from disc**: watch a DVD or Blu-ray straight from the disc without copying. MakeMKV streams the chosen title to the player, and the picture is enhanced during playback with NVIDIA RTX Video Super Resolution (N toggles). Playback starts in about half a minute.
 

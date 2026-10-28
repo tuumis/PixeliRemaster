@@ -176,6 +176,7 @@ fi: {
 
   "vertailu.luodaan": "Luodaan esikatselua…",
   "vertailu.odottaa_asennusta": "Esikatselu luodaan, kun ensimmäisen käytön valmistelu on valmis.",
+  "vertailu.kaynnistyy": "Käynnistetään… esikatselu alkaa muutaman sekunnin kuluttua.",
   "vertailu.analysoidaan": "Analysoidaan videota…",
   "vertailu.virhe": "Esikatselun luonti epäonnistui.",
   "vertailu.uudelleen": "Yritä uudelleen",
@@ -539,6 +540,7 @@ en: {
 
   "vertailu.luodaan": "Creating preview…",
   "vertailu.odottaa_asennusta": "The preview will be created once first-use setup is complete.",
+  "vertailu.kaynnistyy": "Starting… the preview begins in a few seconds.",
   "vertailu.analysoidaan": "Analyzing video…",
   "vertailu.virhe": "Creating the preview failed.",
   "vertailu.uudelleen": "Try again",

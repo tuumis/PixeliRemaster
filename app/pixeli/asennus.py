@@ -47,6 +47,12 @@ class Ymparisto:
             "asennus": {"kaynnissa": False, "vaihe": None, "edistys": None, "virhe": None, "tieto": None},
             "testitila": os.environ.get("PIXELI_LAITE") == "numpy",
         }
+        # Edellinen itsetesti samalla versiolla onnistui: käyttöliittymä avautuu heti normaaliin näkymään,
+        # ja käynnistystarkistus (tekoälykirjaston lataus muistiin kestää sekunteja) tehdään taustalla.
+        # Käsittely odottaa tarkistusta; asennusnäkymä tulee esiin vain, jos tarkistus löytää ongelman.
+        it = m.lue_json(m.DATA / "itsetesti.json") or {}
+        self._edellinen_ok = bool(it.get("versio") == m.VERSIO and it.get("ok") and it.get("valmis")
+                                  and m.ffmpeg_ok())
         threading.Thread(target=self._tarkista, daemon=True).start()
 
     # ------------------------------------------------------------ tarkistus
@@ -119,6 +125,7 @@ class Ymparisto:
         with self.lukko:
             d = {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.tila.items()}
         d["valmis"] = self.valmis()
+        d["kaynnistyy"] = bool(not d["tarkistettu"] and self._edellinen_ok and not d["asennus"]["kaynnissa"])
         it = d.get("itsetesti") or {}
         d["itsetesti"] = {k: it.get(k) for k in ("ok", "nopeus", "naytonohjain", "virheet")} if it else None
         return d

@@ -122,7 +122,7 @@ window.pixeliPudotettu = lisaysTulos;
 /* ------------------------------------------------------------ pääpiirto */
 function piirra() {
   const ymp = TILA.ymparisto;
-  const valmis = ymp.valmis;
+  const valmis = ymp.valmis || ymp.kaynnistyy;      // käynnistystarkistus taustalla: pääikkuna heti
   $("#asennus").hidden = valmis;
   $("#paa").hidden = !$("#asennus").hidden;
   if (!$("#asennus").hidden) { piirraAsennus(ymp); return; }
@@ -260,7 +260,7 @@ function tyoAllekirjoitus(x) {
     (x.valinta || {}).asetus, (x.valinta || {}).dar, (x.valinta || {}).skaala, (x.valinta || {}).kierto, (x.valinta || {}).muoto,
     (x.valinta || {}).laatu, (x.valinta || {}).aanet, (x.valinta || {}).tekstit, (x.valinta || {}).ulkoiset, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
     (x.valinta || {}).naarmut, (x.valinta || {}).vari, !!x.polku, (x.valinta || {}).puhe, (x.valinta || {}).ocr,
-    x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika,
+    x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, TILA.ymparisto.kaynnistyy, x.liike && x.liike.tila, x.koe && x.koe.aika,
     x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan, (TILA.jono.asetukset || {}).teho,
     TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length]);
 }
@@ -437,7 +437,7 @@ function vertailuHtml(x) {
     return `<div class="nayttamo" id="nayttamo"><img id="kuva-o" alt=""><div class="vasen"><img id="kuva-v" alt=""></div>
       <div class="jako"></div><span class="lappu v" id="lappu-v">${t("vertailu.alkuperainen")}</span><span class="lappu o" id="lappu-o"></span></div>`;
   }
-  if (!TILA.ymparisto.valmis) return `<div class="vertailu-tyhja"><div>${t("vertailu.odottaa_asennusta")}</div></div>`;
+  if (!TILA.ymparisto.valmis) return `<div class="vertailu-tyhja"><div>${t(TILA.ymparisto.kaynnistyy ? "vertailu.kaynnistyy" : "vertailu.odottaa_asennusta")}</div></div>`;
   if (k.tila === "virhe") return `<div class="vertailu-tyhja"><div>${t(String(k.tieto || "").includes("mallin_lataus") ? "virhe.mallin_lataus" : "vertailu.virhe")}<br><br><button class="painike toissijainen" id="koe-uudelleen">${t("vertailu.uudelleen")}</button></div></div>`;
   return `<div class="vertailu-tyhja"><div>${t("vertailu.luodaan")}<div class="edistys"><i id="koe-palkki"></i></div></div></div>`;
 }
