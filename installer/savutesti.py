@@ -217,6 +217,14 @@ assert _lv.nimikkeet_asemalta("X:", "bluray")["virhe"] == "bluray_makemkv"
 assert _lv.nimikkeet_asemalta("X:", "muu")["virhe"] == "ei_videolevy"
 _lv.makemkvcon = _mk
 assert _lv.kesto_otsikosta("title: 3 (01:45:32.120) (00800.mpls)") == 6332
+_nl = _lv.NimikkeenLoppu(0)
+_nr = ["[dvdnav] switched to VTS: 1 (old=0) domain=VTS",
+       "[dvdnav] cell change: cell=1 pg=1 pgc_len=150.000 cur_time=0.000 domain=VTS", "[dvdnav] new title 1",
+       "[dvdnav] cell change: cell=2 pg=2 pgc_len=150.000 cur_time=50.000 domain=VTS",
+       "[dvdnav] cell change: cell=1 pg=1 pgc_len=150.000 cur_time=0.000 domain=VTS"]
+assert [_nl.rivi(x) for x in _nr] == [False, False, False, False, True] and _nl.syy.startswith("solu"), _nl.syy
+_nl = _lv.NimikkeenLoppu(0)
+assert not _nl.rivi(_nr[1]) and _nl.rivi("[dvdnav] new title 2") and _nl.syy == "nimike 2"
 print("levy ja soitin OK")
 
 ymp = asennus.Ymparisto()

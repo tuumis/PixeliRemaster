@@ -384,6 +384,42 @@ def lukumetat(luvut, kesto):
     return "\n".join(rivit) + "\n"
 
 
+class NimikkeenLoppu:
+    """Soittimen (-v) lokiriveistä: milloin levynlukija on siirtynyt valitun nimikkeen ulkopuolelle."""
+    SOLU = re.compile(r"cell change: cell=(\d+) pg=\d+ pgc_len=[\d.]+ cur_time=([\d.]+) domain=(\w+)")
+    UUSI = re.compile(r"new title (\d+)")
+
+    def __init__(self, nimike):
+        self.nimike = int(nimike) + 1          # libdvdnavin numerointi alkaa ykkösestä
+        self.alkanut = False
+        self.solu = 0
+        self.aika = -1.0
+        self.syy = None
+
+    def rivi(self, rivi):
+        if self.syy:
+            return False
+        r = self.SOLU.search(rivi)
+        if r:
+            solu, aika, alue = int(r.group(1)), float(r.group(2)), r.group(3)
+            if self.alkanut:
+                if alue != "VTS":
+                    self.syy = f"alue {alue}"
+                elif solu < self.solu or aika + 1.0 < self.aika:
+                    self.syy = f"solu {self.solu}->{solu}, aika {self.aika:.0f}->{aika:.0f}"
+            if not self.syy and alue == "VTS":
+                self.alkanut, self.solu, self.aika = True, solu, aika
+            return bool(self.syy)
+        r = self.UUSI.search(rivi)
+        if r and self.alkanut and int(r.group(1)) != self.nimike:
+            self.syy = f"nimike {r.group(1)}"
+        elif "Requested title not found" in rivi and self.alkanut:
+            self.syy = "nimike vaihtui"
+        elif "switched to VTS" in rivi and self.alkanut:
+            self.syy = "nimikejoukko vaihtui"
+        return bool(self.syy)
+
+
 def tiedoston_kesto(polku):
     try:
         r = subprocess.run([m.ffbin("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of",
@@ -421,17 +457,26 @@ def rippaa_dvd(asema, nimike, kesto, kansio, edistys=None, peruuta=None, arvio=0
     cmd = [exe, "--no-config", "--quiet", "--msg-level=all=v", f"--dvd-device={laite}", f"--stream-dump={vob}",
            f"dvd://{int(nimike)}"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=m.PIILOTA)
+    # Soittimen levynlukija ei lopeta nimikkeen loppuun, vaan jatkaa levyn ohjelman mukaan (seuraava nimike,
+    # valikko tai sama nimike alusta). Nimikkeen loppu tunnistetaan lokista, ja ylimääräinen osa leikataan
+    # pakattaessa nimikkeen kestoon.
+    loppu = NimikkeenLoppu(nimike)
 
     def lue():
         with open(loki / "levy_kopiointi.log", "wb") as lf:
-            while True:
-                pala = p.stdout.read(4096)
-                if not pala:
-                    break
-                lf.write(pala)
+            for rivi in iter(p.stdout.readline, b""):
+                lf.write(rivi)
+                if loppu.rivi(rivi.decode("utf-8", "replace")):
+                    lf.write(f"[PixeliRemaster] nimike loppui: {loppu.syy}\n".encode("utf-8"))
+                    lf.flush()
+                    try:
+                        p.kill()
+                    except OSError:
+                        pass
     lukija = threading.Thread(target=lue, daemon=True)
     lukija.start()
     arvio = float(arvio or 0) or max(1.0, float(kesto or 0)) * 0.8e6        # DVD keskimäärin ~6 Mbit/s
+    yla = max(3 * arvio, arvio + 2e9)
     while p.poll() is None:
         if peruuta is not None and peruuta.is_set():
             p.kill()
@@ -441,10 +486,14 @@ def rippaa_dvd(asema, nimike, kesto, kansio, edistys=None, peruuta=None, arvio=0
             except OSError:
                 pass
             raise m.Peruutettu()
+        koko = vob.stat().st_size if vob.exists() else 0
+        if koko > yla and not loppu.syy:                  # varmistus: ei koskaan loputonta kopiointia
+            loppu.syy = "koko"
+            p.kill()
         if edistys:
-            koko = vob.stat().st_size if vob.exists() else 0
             edistys(0.95 * min(0.99, koko / arvio))
         time.sleep(0.5)
+    p.wait()
     lukija.join(timeout=5)
     if peruuta is not None and peruuta.is_set():
         try:
@@ -452,7 +501,9 @@ def rippaa_dvd(asema, nimike, kesto, kansio, edistys=None, peruuta=None, arvio=0
         except OSError:
             pass
         raise m.Peruutettu()
-    if p.returncode != 0 or not vob.exists() or vob.stat().st_size < 1_000_000:
+    if loppu.syy:
+        m.loki(f"DVD-nimike {nimike} loppui ({loppu.syy}), kopio {vob.stat().st_size if vob.exists() else 0} t")
+    if (p.returncode != 0 and not loppu.syy) or not vob.exists() or vob.stat().st_size < 1_000_000:
         try:
             hanta = (loki / "levy_kopiointi.log").read_bytes()[-1500:].decode("utf-8", "replace")
         except OSError:
@@ -480,6 +531,7 @@ def rippaa_dvd(asema, nimike, kesto, kansio, edistys=None, peruuta=None, arvio=0
     cmd = [m.ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-probesize", "400M",
            "-analyzeduration", "400M", "-fflags", "+genpts", "-i", str(vob), *lukuarg,
            "-map", "0:v:0", "-map", "0:a?", "-map", "0:s?", "-c", "copy",
+           *(["-t", f"{float(kesto) + 1.0:.3f}"] if kesto else []),
            *(["-map_chapters", "1"] if lukuarg else []), *meta, str(mkv)]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                        creationflags=m.PIILOTA)
