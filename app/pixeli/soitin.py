@@ -333,9 +333,14 @@ def katso_levylta(indeksi, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
                 lataa(lambda f: TILA.update({"edistys": round(f, 3)}))
                 TILA.update({"tila": "valmis", "edistys": 1.0})
             st = levy.Suoratoisto(indeksi)
-            nimikkeet = levy.suoratoiston_nimikkeet(st.juuri)
+            nimikkeet = []
+            for _ in range(40):                       # levyn luku voi jatkua vielä palvelimen käynnistyttyä
+                nimikkeet = levy.suoratoiston_nimikkeet(st.juuri)
+                if nimikkeet:
+                    break
+                time.sleep(2)
             if not nimikkeet:
-                raise RuntimeError("suoratoisto_ei_nimikkeita")
+                raise RuntimeError("suoratoisto_ei_nimikkeita: " + " | ".join(st.viestit[-3:]))
             valittu = min(nimikkeet, key=lambda n: abs(n["kesto"] - float(kesto or 0)))
             an = {"korkeus": 1080, "lomitus": "progressiivinen"} if bluray else {"korkeus": 576, "lomitus": "lomitettu"}
             cmd = komento_reaaliaika(valittu["url"], an, kohde_korkeus, nimi, kieli,

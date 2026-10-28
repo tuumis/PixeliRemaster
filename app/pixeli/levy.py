@@ -207,55 +207,88 @@ def _sivu(url):
             for i in range(0, len(s) - 1, 2)}
 
 
-def suoratoiston_nimikkeet(juuri):
-    etusivu = _sivu(juuri)
-    lista = _sivu(etusivu["titles"])
-    tulos = []
-    for i in range(int(lista.get("titlecount") or 0)):
+def suoratoiston_nimikkeet(juuri, maks_sivuja=80):
+    """Käy läpi suoratoistopalvelimen sivut (etusivu -> levy/nimikkeet -> nimike) ja palauttaa nimikkeet,
+    joilla on toistettava tiedosto (file0). Sivujen rakenne vaihtelee versioittain, joten linkkejä
+    seurataan yleisesti saman palvelimen sisällä."""
+    jono, nahty, tulos = [juuri], set(), {}
+    while jono and len(nahty) < maks_sivuja:
+        url = jono.pop(0)
+        if url in nahty:
+            continue
+        nahty.add(url)
         try:
-            t = _sivu(lista[f"title{i}"])
+            sivu = _sivu(url)
         except Exception:  # noqa: BLE001
             continue
-        if t.get("file0"):
-            tulos.append({"i": i, "kesto": kesto_s(t.get("duration")), "url": t["file0"]})
-    return tulos
+        if sivu.get("file0"):
+            tunnus = sivu.get("id") or url
+            tulos[tunnus] = {"i": len(tulos), "kesto": kesto_s(sivu.get("duration")), "url": sivu["file0"],
+                             "sivu": url}
+            continue
+        for k, v in sivu.items():
+            if isinstance(v, str) and v.startswith(juuri) and v not in nahty and not v.endswith(
+                    (".m2ts", ".ts", ".mkv", ".mpg", ".vob")):
+                jono.append(v)
+    return sorted(tulos.values(), key=lambda x: -x["kesto"])
+
+
+PORTTI = 51000
 
 
 class Suoratoisto:
-    """makemkvcon stream: levyn nimikkeet HTTP-palvelimena vain tälle koneelle (127.0.0.1)."""
+    """makemkvcon stream: levyn nimikkeet HTTP-palvelimena vain tälle koneelle (127.0.0.1).
+    Palvelin palvelee asemissa olevia levyjä; valmius todetaan vastaamalla HTTP:hen."""
 
-    def __init__(self, indeksi):
+    def __init__(self, indeksi=None, odota_s=150):
         exe = makemkvcon()
         if not exe:
             raise RuntimeError("makemkv_puuttuu")
-        self.p = subprocess.Popen([exe, "-r", "--bindip=127.0.0.1", "stream", f"disc:{int(indeksi)}"],
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+        self.juuri = f"http://127.0.0.1:{PORTTI}/"
+        loki = m.DATA / "lokit"
+        loki.mkdir(parents=True, exist_ok=True)
+        self._loki = open(loki / "makemkv_suoratoisto.log", "w", encoding="utf-8", errors="replace")
+        cmd = [exe, "-r", "stream", "--upnp=false", "--bindip=127.0.0.1", f"--bindport={PORTTI}"]
+        self._loki.write(" ".join(cmd) + "\n")
+        self.p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                   errors="replace", creationflags=m.PIILOTA)
-        self.juuri, self.viestit = None, []
-        valmis = threading.Event()
+        self.viestit = []
 
         def lue():
             for rivi in self.p.stdout:
+                self._loki.write(rivi)
+                self._loki.flush()
+                teksti = rivi.strip()
                 if rivi.startswith("MSG:"):
                     try:
                         k = _kentat(rivi[4:])
+                        teksti = k[3] if len(k) > 3 else teksti
                     except Exception:  # noqa: BLE001
-                        continue
-                    self.viestit.append(k[3] if len(k) > 3 else rivi)
-                    if k[0] == "4500" and not self.juuri:
-                        portti = next((x for x in k[5:] if x.isdigit()), None)
-                        r = re.search(r":(\d{2,5})", " ".join(k[3:]))
-                        portti = portti or (r.group(1) if r else "51000")
-                        self.juuri = f"http://127.0.0.1:{portti}/"
-                        valmis.set()
-            valmis.set()
+                        pass
+                if teksti:
+                    self.viestit.append(teksti)
         threading.Thread(target=lue, daemon=True).start()
-        if not valmis.wait(120) or not self.juuri:
-            self.lopeta()
-            raise RuntimeError("suoratoisto_ei_kaynnistynyt: " + (self.viestit[-1] if self.viestit else ""))
+        loppu = time.time() + odota_s
+        while time.time() < loppu:
+            if self.p.poll() is not None:
+                time.sleep(0.3)
+                raise RuntimeError("suoratoisto_paattyi: " + " | ".join(self.viestit[-3:]))
+            try:
+                with urllib.request.urlopen(self.juuri, timeout=3) as r:
+                    if r.status == 200:
+                        return
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(1.0)
+        self.lopeta()
+        raise RuntimeError("suoratoisto_ei_vastaa: " + " | ".join(self.viestit[-3:]))
 
     def lopeta(self):
         try:
             self.p.kill()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._loki.close()
         except Exception:  # noqa: BLE001
             pass
