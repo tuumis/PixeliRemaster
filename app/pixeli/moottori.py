@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.7.2"
+VERSIO = "1.7.3"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -1359,7 +1359,7 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
         except OSError:
             pass
     maarat = meta["maarat"]
-    tila = {"viim": 0.0, "historia": [(time.time(), sum(maarat.values()))]}
+    tila = {"t0": time.time(), "viim": 0.0, "historia": [(time.time(), sum(maarat.values()))]}
 
     with L.lukko:
         ketju = L.ketju(geo, n, saato, an)

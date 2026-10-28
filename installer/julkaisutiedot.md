@@ -1,3 +1,6 @@
+**Korjattu 1.7.3:** videon käsittely päättyi versioissa 1.6.0–1.7.2 virheilmoitukseen aivan lopussa, vaikka valmis tiedosto ehdittiin tallentaa. Nyt käsittely päättyy normaalisti.
+**Fixed in 1.7.3:** in versions 1.6.0–1.7.2, video processing ended with an error right at the end even though the finished file had been saved. Processing now finishes normally.
+
 **Korjattu 1.7.2:** Katso nyt -toistossa näkyy nyt selvästi, onko RTX-parannus päällä: toiston alussa ja N-näppäimellä soitin kertoo tilan ja suurennuksen (esim. 720×576 → 1800×1440). Jos näytönohjain tai ajuri ei tue parannusta, soitin kertoo senkin.
 **Fixed in 1.7.2:** Watch now playback clearly shows whether RTX enhancement is on: at the start and when pressing N, the player shows the state and the upscaling (e.g. 720×576 → 1800×1440). If the graphics card or driver doesn't support it, the player says so.
 

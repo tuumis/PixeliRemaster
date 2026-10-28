@@ -412,4 +412,30 @@ if shutil.which("ffmpeg"):
     kaikki = int(float(an_v["kesto"]) * float(Fraction(an_v["R"])) + 0.5)
     print(f"::notice title=torchtesti::monikuvaketju osissa: {yht}/{kaikki} kuvaa")
     assert yht == kaikki, (yht, kaikki)
+# koko videon käsittely alusta loppuun (osat, yhdistäminen, ääni ja tulos), kuten käyttäjällä
+if shutil.which("ffmpeg"):
+    tk = Path(tempfile.mkdtemp(prefix="kokovideo_"))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=25:d=3", "-f", "lavfi",
+                    "-i", "sine=d=3", "-c:v", "mpeg2video", "-c:a", "ac3", "-shortest", str(tk / "v.mkv")], check=True)
+    an_k = m.analysoi(tk / "v.mkv", tk)
+    geo_k = m.geometria(an_k, {}, kohde=(320, 240))
+
+    class _L:
+        lukko = __import__("threading").Lock()
+        ops = ot
+        era = 2
+
+        def ketju(self, geo, n, saato, an):
+            return kuva.Ketju(ot, geo["rajaus"][3], geo["rajaus"][2], geo["oh"], geo["ow"], {})
+    vanha_n = m.OSAN_PITUUS_S
+    m.OSAN_PITUUS_S = 1.0                         # useita osia
+    try:
+        tk_ = m.kasittele(tk / "v.mkv", an_k, geo_k, {"asetus": 1, "saato": {}}, tk, _L(), tk / "v [Remaster].mkv")
+    finally:
+        m.OSAN_PITUUS_S = vanha_n
+    assert Path(tk_["ulos"]).is_file() and "aika_s" in tk_, tk_
+    (tk / "u").mkdir(exist_ok=True)
+    an_u = m.analysoi(Path(tk_["ulos"]), tk / "u")
+    assert abs(an_u["kesto"] - an_k["kesto"]) < 0.3 and an_u.get("aaniraidat"), (an_u["kesto"], an_k["kesto"])
+    print(f"::notice title=torchtesti::koko video: {an_u['leveys']}x{an_u['korkeus']}, {an_u['kesto']:.2f} s, ääni mukana")
 print("TORCHTESTI OK")
