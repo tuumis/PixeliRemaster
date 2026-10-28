@@ -161,7 +161,16 @@ class Sovellus:
             return {"makemkv": True, "asemat": levy.asemat()}
         if polku == "levy_nimikkeet":
             return levy.nimikkeet(int(d["indeksi"]))
+        if polku == "levy_katso":
+            if j._ripattava:
+                raise RuntimeError("asema_kaytossa")
+            k = j.asetukset.get("kieli") or "auto"
+            kieli = self.kieli_jarjestelma if k == "auto" else k
+            return soitin.katso_levylta(int(d["indeksi"]), d.get("kesto") or 0, bool(d.get("bluray")),
+                                        j.kohde()[1], levy.turvallinen_nimi(d.get("levy") or ""), kieli)
         if polku == "levy_lisaa":
+            if soitin.SUORA["tila"] in ("avataan", "toistetaan"):
+                raise RuntimeError("asema_kaytossa")
             return j.lisaa_levylta(int(d["indeksi"]), int(d["nimike"]), d.get("levy") or "", d.get("kesto") or 0,
                                    bool(d.get("kasittele", True)), bool(d.get("sailyta", True)))
         if polku == "tyokalut":

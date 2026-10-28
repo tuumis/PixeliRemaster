@@ -78,7 +78,7 @@ async function hae() {
     }
   } catch (e) { /* palvelin käynnistyy tai sulkeutuu */ }
   const kiire = TILA && (TILA.ymparisto.asennus.kaynnissa || TILA.jono.kasiteltava ||
-    ["ladataan", "asennetaan"].includes((TILA.paivitys || {}).tila) ||
+    ["ladataan", "asennetaan"].includes((TILA.paivitys || {}).tila) || ((TILA.soitin || {}).suora || {}).tila === "avataan" ||
     TILA.jono.tyot.some(x => ["analysoidaan", "kasitellaan"].includes(x.tila) || ["jonossa", "kaynnissa"].includes(x.koe?.tila) || ["jonossa", "kaynnissa"].includes(x.liike?.tila)));
   setTimeout(hae, kiire ? 600 : 1500);
 }
@@ -882,7 +882,12 @@ function piirraSoitin() {
   else if (s.tila === "virhe" && soitinEdellinen === "ladataan") ilmoita(t("soitin.lataus_virhe"));
   else if (s.tila === "valmis" && soitinEdellinen === "ladataan") ilmoita(t("soitin.avataan"));
   soitinEdellinen = s.tila;
+  const su = s.suora || {};
+  if (su.tila === "avataan" && s.tila !== "ladataan") ilmoita(t("levy.avataan"));
+  else if (su.tila === "virhe" && suoraEdellinen !== "virhe") ilmoita(t("levy.katso_virhe"));
+  suoraEdellinen = su.tila;
 }
+let suoraEdellinen = null;
 
 /* ------------------------------------------------------------ levyltä */
 let levyTila = {};
@@ -890,6 +895,7 @@ function levyMinuutit(s) { const h = Math.floor(s / 3600), mm = Math.round((s % 
 function piirraLevy() {
   const L = levyTila, c = $("#levy-sisalto"), aloita = $("#levy-aloita");
   aloita.disabled = true;
+  $("#levy-katso").disabled = true;
   if (L.vaihe === "ei_makemkv") {
     c.innerHTML = `<p>${t("levy.ei_makemkv")}</p><p><code>https://www.makemkv.com/download/</code></p><p>${t("levy.ei_makemkv2")}</p>`;
   } else if (L.vaihe === "haetaan" || L.vaihe === "luetaan") {
@@ -914,7 +920,17 @@ function piirraLevy() {
     $("#levy-sailyta").addEventListener("change", e => { L.sailyta = e.target.checked; });
     $("#levy-asema")?.addEventListener("change", e => lueNimikkeet(Number(e.target.value)));
     aloita.disabled = L.valittu == null;
+    $("#levy-katso").disabled = L.valittu == null;
   }
+}
+async function katsoLevylta() {
+  const L = levyTila, n = (L.nimikkeet || []).find(x => x.id === L.valittu); if (!n) return;
+  const r = await api("levy_katso", {indeksi: L.indeksi, kesto: n.kesto, bluray: !!L.bluray, levy: L.levy})
+    .catch(e => ({virhe: String(e.message || e)}));
+  $("#levy").close();
+  if (r.virhe) ilmoita(t(r.virhe === "asema_kaytossa" ? "levy.asema_kaytossa" : "levy.katso_virhe"));
+  else ilmoita(t("levy.avataan"));
+  hae_kerran();
 }
 async function lueNimikkeet(indeksi) {
   const L = levyTila; L.indeksi = indeksi; L.vaihe = "luetaan"; piirraLevy();
@@ -922,7 +938,8 @@ async function lueNimikkeet(indeksi) {
   if (levyTila !== L) return;
   if (!r.nimikkeet || !r.nimikkeet.length) { L.vaihe = "virhe"; L.viesti = r.virhe || ""; piirraLevy(); return; }
   const a = L.asemat.find(x => x.indeksi === indeksi) || {};
-  Object.assign(L, {vaihe: "nimikkeet", nimikkeet: r.nimikkeet, levy: r.levy || a.levy || "", valittu: r.nimikkeet[0].id});
+  Object.assign(L, {vaihe: "nimikkeet", nimikkeet: r.nimikkeet, levy: r.levy || a.levy || "", valittu: r.nimikkeet[0].id,
+    bluray: !!r.bluray});
   piirraLevy();
 }
 async function avaaLevy() {
@@ -1038,6 +1055,7 @@ function kytkeAsetukset() {
   $("#paivitys-nappi").addEventListener("click", avaaPaivitys);
   $("#lisaa-levy").addEventListener("click", avaaLevy);
   $("#levy-aloita").addEventListener("click", aloitaLevy);
+  $("#levy-katso").addEventListener("click", katsoLevylta);
   $("#levy").addEventListener("close", () => { levyTila = {}; });
   $("#paivitys-aloita").addEventListener("click", async () => {
     await api("paivita").catch(() => null);

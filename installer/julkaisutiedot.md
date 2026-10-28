@@ -1,3 +1,6 @@
+**Uutta 1.9.0:** **Katso levyltä**: DVD:n tai Blu-rayn voi katsoa suoraan levyltä ilman kopiointia. MakeMKV välittää valitun nimikkeen soittimeen, ja kuva paranee toiston aikana NVIDIAn RTX Video Super Resolutionilla (N vaihtaa päälle/pois). Toisto alkaa noin puolessa minuutissa.
+**New in 1.9.0:** **Watch from disc**: watch a DVD or Blu-ray straight from the disc without copying. MakeMKV streams the chosen title to the player, and the picture is enhanced during playback with NVIDIA RTX Video Super Resolution (N toggles). Playback starts in about half a minute.
+
 **Korjattu 1.8.1:** itsetesti keskeytyi 1.8.0:ssa nopeusmittauksen lopussa, joten ohjelma jäi aloitusnäkymään. Nopeampi laskentatapa on nyt käytössä (RTX 4060:llä noin 27 % nopeampi).
 **Fixed in 1.8.1:** in 1.8.0 the self-test stopped at the end of the speed measurement, leaving the program on the setup screen. The faster computation method is now in use (about 27% faster on an RTX 4060).
 

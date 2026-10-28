@@ -54,6 +54,7 @@ def versio():
 
 def tila():
     d = dict(TILA)
+    d["suora"] = dict(SUORA)
     d["asennettu"] = bool(mpv_exe())
     return d
 
@@ -304,13 +305,53 @@ def rtx_skripti(suodin, kieli="fi"):
                        "varalla": _lua_jono(varalla)}
 
 
-def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi"):
+def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=()):
     suodin = rtx_suodin(an, kohde_korkeus)
     skripti = kansio() / "pixeli_rtx.lua"
     skripti.parent.mkdir(parents=True, exist_ok=True)
     skripti.write_text(rtx_skripti(suodin, kieli), encoding="utf-8")
     return [mpv_exe(), *_yhteiset(f"{nimi} – reaaliaikainen parannus"), "--hwdec=d3d11va", "--gpu-api=d3d11",
-            "--vo=gpu-next", f"--script={skripti}", "--", str(alkuperainen)]
+            "--vo=gpu-next", f"--script={skripti}", *lisat, "--", str(alkuperainen)]
+
+
+SUORA = {"tila": "ei", "virhe": None}
+
+
+def katso_levylta(indeksi, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
+    """Levyn nimike suoraan MakeMKV:n suoratoistosta soittimeen RTX-parannuksella (ei kopiointia).
+    Suoratoistopalvelin sammutetaan, kun soitin suljetaan."""
+    from . import levy
+    if SUORA["tila"] in ("avataan", "toistetaan"):
+        return dict(SUORA)
+    SUORA.update({"tila": "avataan", "virhe": None})
+
+    def saie():
+        st = None
+        try:
+            if not mpv_exe():
+                TILA.update({"tila": "ladataan", "edistys": 0.0, "virhe": None})
+                lataa(lambda f: TILA.update({"edistys": round(f, 3)}))
+                TILA.update({"tila": "valmis", "edistys": 1.0})
+            st = levy.Suoratoisto(indeksi)
+            nimikkeet = levy.suoratoiston_nimikkeet(st.juuri)
+            if not nimikkeet:
+                raise RuntimeError("suoratoisto_ei_nimikkeita")
+            valittu = min(nimikkeet, key=lambda n: abs(n["kesto"] - float(kesto or 0)))
+            an = {"korkeus": 1080, "lomitus": "progressiivinen"} if bluray else {"korkeus": 576, "lomitus": "lomitettu"}
+            cmd = komento_reaaliaika(valittu["url"], an, kohde_korkeus, nimi, kieli,
+                                     ["--cache=yes", "--demuxer-max-bytes=300MiB", "--demuxer-readahead-secs=30"])
+            m.loki(f"Katsotaan levyltä: nimike {valittu['i']} ({valittu['kesto']} s)")
+            SUORA["tila"] = "toistetaan"
+            kaynnista(cmd).wait()
+            SUORA["tila"] = "ei"
+        except Exception as e:  # noqa: BLE001
+            m.loki(f"Levyltä katselu epäonnistui: {e}")
+            SUORA.update({"tila": "virhe", "virhe": str(e)[:300]})
+        finally:
+            if st:
+                st.lopeta()
+    threading.Thread(target=saie, name="levylta", daemon=True).start()
+    return dict(SUORA)
 
 
 KESKEN_TEKSTIT = {

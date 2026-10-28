@@ -107,7 +107,9 @@ def nimikkeet(indeksi):
     if not lista:
         # tyypillisesti: ei levyä, Blu-ray-betan avain vanhentunut tai levyä ei voitu lukea
         virhe = next((v for v in reversed(d["viestit"]) if v), None)
-    return {"levy": levyn_nimi, "nimikkeet": lista, "virhe": virhe}
+    tyyppi = (d["levy"].get(1) or "").lower()       # esim. "DVD disc" / "Blu-ray disc"
+    return {"levy": levyn_nimi, "nimikkeet": lista, "virhe": virhe,
+            "bluray": "blu" in tyyppi or any(x["lahde"].lower().endswith(".mpls") for x in lista)}
 
 
 def turvallinen_nimi(s, oletus="Levy"):
@@ -163,3 +165,97 @@ def rippaa(indeksi, nimike, kansio, edistys=None, peruuta=None):
         viesti = next((v for v in reversed(viestit) if v), "")
         raise RuntimeError(f"rippaus_epaonnistui: {viesti[-300:]}")
     return max(uudet, key=lambda q: q.stat().st_size)
+
+
+# ------------------------------------------------------------------ suoratoisto (katselu suoraan levyltä)
+
+import html.parser  # noqa: E402
+import threading  # noqa: E402
+import urllib.parse  # noqa: E402
+import urllib.request  # noqa: E402
+
+
+class _Solut(html.parser.HTMLParser):
+    """MakeMKV:n suoratoistosivut ovat avain-arvo-taulukoita: <td>avain</td><td>arvo tai <a href></td>."""
+
+    def __init__(self):
+        super().__init__()
+        self.solut, self._nyt, self._href = [], None, None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "td":
+            self._nyt, self._href = "", None
+        elif tag == "a" and self._nyt is not None:
+            self._href = dict(attrs).get("href")
+
+    def handle_data(self, data):
+        if self._nyt is not None:
+            self._nyt += data
+
+    def handle_endtag(self, tag):
+        if tag == "td" and self._nyt is not None:
+            self.solut.append((self._nyt.strip(), self._href))
+            self._nyt = None
+
+
+def _sivu(url):
+    with urllib.request.urlopen(url, timeout=30) as r:
+        p = _Solut()
+        p.feed(r.read().decode("utf-8", "replace"))
+    s = p.solut
+    return {s[i][0]: (urllib.parse.urljoin(url, s[i + 1][1]) if s[i + 1][1] else s[i + 1][0])
+            for i in range(0, len(s) - 1, 2)}
+
+
+def suoratoiston_nimikkeet(juuri):
+    etusivu = _sivu(juuri)
+    lista = _sivu(etusivu["titles"])
+    tulos = []
+    for i in range(int(lista.get("titlecount") or 0)):
+        try:
+            t = _sivu(lista[f"title{i}"])
+        except Exception:  # noqa: BLE001
+            continue
+        if t.get("file0"):
+            tulos.append({"i": i, "kesto": kesto_s(t.get("duration")), "url": t["file0"]})
+    return tulos
+
+
+class Suoratoisto:
+    """makemkvcon stream: levyn nimikkeet HTTP-palvelimena vain tälle koneelle (127.0.0.1)."""
+
+    def __init__(self, indeksi):
+        exe = makemkvcon()
+        if not exe:
+            raise RuntimeError("makemkv_puuttuu")
+        self.p = subprocess.Popen([exe, "-r", "--bindip=127.0.0.1", "stream", f"disc:{int(indeksi)}"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                  errors="replace", creationflags=m.PIILOTA)
+        self.juuri, self.viestit = None, []
+        valmis = threading.Event()
+
+        def lue():
+            for rivi in self.p.stdout:
+                if rivi.startswith("MSG:"):
+                    try:
+                        k = _kentat(rivi[4:])
+                    except Exception:  # noqa: BLE001
+                        continue
+                    self.viestit.append(k[3] if len(k) > 3 else rivi)
+                    if k[0] == "4500" and not self.juuri:
+                        portti = next((x for x in k[5:] if x.isdigit()), None)
+                        r = re.search(r":(\d{2,5})", " ".join(k[3:]))
+                        portti = portti or (r.group(1) if r else "51000")
+                        self.juuri = f"http://127.0.0.1:{portti}/"
+                        valmis.set()
+            valmis.set()
+        threading.Thread(target=lue, daemon=True).start()
+        if not valmis.wait(120) or not self.juuri:
+            self.lopeta()
+            raise RuntimeError("suoratoisto_ei_kaynnistynyt: " + (self.viestit[-1] if self.viestit else ""))
+
+    def lopeta(self):
+        try:
+            self.p.kill()
+        except Exception:  # noqa: BLE001
+            pass
