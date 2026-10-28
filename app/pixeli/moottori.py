@@ -1622,7 +1622,7 @@ def katselutiedot(src, an, wd, valmis=False):
     rivit = ["# mpv EDL v0", "!new_stream"] + [_edl_polku(p) for p, _ in osat] + ["!new_stream", _edl_polku(src)]
     edl = Path(wd) / "katselu.edl"
     tmp = edl.with_suffix(".edl.tmp")
-    tmp.write_text("\n".join(rivit) + "\n", encoding="utf-8")
+    tmp.write_text("\n".join(rivit) + "\n", encoding="utf-8", newline="\n")   # mpv vaatii LF-rivinvaihdot
     tmp.replace(edl)
     tila = Path(wd) / "katselu.json"
     tmpj = tila.with_suffix(".json.tmp")
