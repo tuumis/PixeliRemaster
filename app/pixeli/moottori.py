@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.8.0"
+VERSIO = "1.8.1"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -802,6 +802,7 @@ def itsetesti(edistys=None):
     from . import lisamallit
     if lisamallit.polku("kohina"):
         D = L.kohinamalli()
+        xb = L.ops.tensor(np.repeat(testikuva(576, 720), 2, axis=0))
         with torch.inference_mode():
             for _ in range(2):
                 D(xb, 8.0)
@@ -849,17 +850,18 @@ def _mittaa_nopeus(L, n, era, kierrokset=4, tulos_out=None):
     xb = L.ops.from_uint8(np.repeat((testikuva(576, 720)[0].transpose(1, 2, 0) * 255).astype(np.uint8)[None],
                                     era, axis=0))
     k = kuva.Ketju(L.ops, 576, 720, 1440, 1920, L.asetus(n))
+    synk = torch.cuda.synchronize if torch.cuda.is_available() else (lambda: None)
     with torch.inference_mode():
-        for _ in range(2):
-            L.ops.pakkaa(*k(xb))
-        torch.cuda.synchronize()
+        ensimmainen = L.ops.pakkaa(*k(xb, 0))       # vertailuun: ensimmäinen kuva samalla siemenellä
+        L.ops.pakkaa(*k(xb))
+        synk()
         t = time.perf_counter()
         for i in range(kierrokset):
-            y = L.ops.pakkaa(*k(xb, i * era))
-        torch.cuda.synchronize()
+            L.ops.pakkaa(*k(xb, i * era))
+        synk()
         fps = era * kierrokset / (time.perf_counter() - t)
         if tulos_out is not None:
-            tulos_out.append(np.asarray(y))
+            tulos_out.append(np.asarray(ensimmainen)[:1])
     del k
     return fps
 

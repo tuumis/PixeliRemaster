@@ -39,6 +39,10 @@ jobs:
           python -m pip install --disable-pip-version-check -q numpy==2.2.6 pillow pillow-heif torch torchvision --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
           python -m pip install --disable-pip-version-check -q facexlib opencv-python-headless
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          # määrittelemättömät nimet (esim. näytönohjainta vaativissa poluissa, joita testit eivät aja)
+          python -m pip install --disable-pip-version-check -q pyflakes
+          $nimet = python -m pyflakes app installer 2>&1 | Select-String "undefined name"
+          if ($nimet) { $nimet | ForEach-Object { Write-Host "::error title=pyflakes::$_" }; throw "määrittelemätön nimi" }
           python installer/torchtesti.py
           if ($LASTEXITCODE -ne 0) { throw "torchtesti epäonnistui" }
 
