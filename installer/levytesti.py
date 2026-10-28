@@ -81,7 +81,9 @@ assert not (kohde2 / "nimike.vob").exists() and not (kohde2 / "nimike.mkv").exis
 cmd = soitin.komento_oma("dvd://1", {"korkeus": 576, "lomitus": "lomitettu"}, "testi",
                          lisat=[f"--dvd-device={levyjuuri}"])
 cmd = [c for c in cmd if not str(c).startswith(("--force-window", "--keep-open", "--fs", "--fullscreen"))]
-r = subprocess.run(cmd + ["--vo=null", "--ao=null", "--frames=30", "--msg-level=all=warn"], capture_output=True,
+i = cmd.index("--") if "--" in cmd else len(cmd)
+cmd = cmd[:i] + ["--vo=null", "--ao=null", "--frames=30", "--msg-level=all=warn"] + cmd[i:]
+r = subprocess.run(cmd, capture_output=True,
                    text=True, encoding="utf-8", errors="replace", timeout=120)
 print("dvd://1 katselu:", r.returncode, r.stdout[-500:], r.stderr[-500:])
 assert r.returncode == 0
