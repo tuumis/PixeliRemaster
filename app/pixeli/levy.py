@@ -310,8 +310,8 @@ def jasenna_dvd(d, ifo=None, koot=None):
     return {"nimikkeet": nimikkeet, "raidat": raidat, "luvut": luvut, "kesto": d.get("duration")}
 
 
-def dvd_tiedot(asema, nimike=None, aikaraja=150):
-    """Levyn nimikkeet (soittimen editionit) ja valitun nimikkeen raidat ja luvut."""
+def soittimen_tiedot(url, laiteasetus, aikaraja=150):
+    """Avaa levyn soittimessa näyttämättä mitään ja palauttaa sen editionit, raidat ja luvut (JSON)."""
     from . import soitin
     exe = soitin.mpv_exe()
     if not exe:
@@ -326,10 +326,8 @@ def dvd_tiedot(asema, nimike=None, aikaraja=150):
         kohde.unlink()
     skripti = kansio / "tiedot.lua"
     skripti.write_text(_TIEDOT_LUA % {"kohde": _lua_jono(kohde)}, encoding="utf-8")
-    laite = str(asema).rstrip("\\/")
     cmd = [exe, "--no-config", "--idle=no", "--vo=null", "--ao=null", "--pause", "--msg-level=all=v",
-           f"--dvd-device={laite}", f"--script={skripti}",
-           f"dvd://{int(nimike)}" if nimike is not None else "dvd://"]
+           laiteasetus, f"--script={skripti}", url]
     loki = m.DATA / "lokit"
     loki.mkdir(parents=True, exist_ok=True)
     with open(loki / "levy_tiedot.log", "wb") as lf:
@@ -340,10 +338,28 @@ def dvd_tiedot(asema, nimike=None, aikaraja=150):
     if not kohde.exists():
         raise RuntimeError("levya_ei_voitu_lukea")
     import json
+    return json.loads(kohde.read_text(encoding="utf-8"))
+
+
+def dvd_tiedot(asema, nimike=None, aikaraja=150):
+    """Levyn nimikkeet (soittimen editionit) ja valitun nimikkeen raidat ja luvut."""
+    laite = str(asema).rstrip("\\/")
+    d = soittimen_tiedot(f"dvd://{int(nimike)}" if nimike is not None else "dvd://", f"--dvd-device={laite}",
+                         aikaraja)
     juuri = laite + "\\"
     ifo = ifo_nimikkeet(juuri)
     koot = {v: vts_koko(juuri, v) for v in {x["vts"] for x in ifo.values()}}
-    return jasenna_dvd(json.loads(kohde.read_text(encoding="utf-8")), ifo, koot)
+    return jasenna_dvd(d, ifo, koot)
+
+
+def nimike_kestolla(editionit, kesto):
+    """Edition, jonka kesto on lähinnä annettua (MakeMKV:n nimikenumerot eivät ole levyn nimikenumeroita)."""
+    paras, ero = None, None
+    for e in editionit or []:
+        pit = kesto_otsikosta(e.get("title"))
+        if pit and (ero is None or abs(pit - kesto) < ero):
+            paras, ero = int(e.get("id", 0)), abs(pit - kesto)
+    return paras
 
 
 def kielimetat(virrat, raidat):

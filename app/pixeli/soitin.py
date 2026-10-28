@@ -461,9 +461,19 @@ def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi", tapa="o
                 an, url, lisat = {"korkeus": 1080, "lomitus": "progressiivinen"}, "bd://", [f"--bluray-device={laite}"]
             else:
                 an, url, lisat = {"korkeus": 576, "lomitus": "lomitettu"}, "dvd://", [f"--dvd-device={laite}"]
-            valinta_kesto = kesto
+            valinta_kesto = 0
             if not bluray and nimike is not None:
-                url, valinta_kesto = f"dvd://{int(nimike)}", 0        # nimike tiedetään: ei kestohakua
+                url = f"dvd://{int(nimike)}"                          # nimike tiedetään suoraan
+            elif kesto:
+                # MakeMKV:n nimikenumero ei ole levyn numero: haetaan levyltä kestoltaan sama nimike
+                from . import levy
+                try:
+                    valittu = levy.nimike_kestolla(levy.soittimen_tiedot(url, lisat[0], 120).get("editions"), kesto)
+                except Exception as e:  # noqa: BLE001
+                    m.loki(f"Levyn nimikkeitä ei saatu soittimelta: {e}")
+                    valittu, valinta_kesto = None, kesto
+                if valittu is not None:
+                    url = f"{url}{valittu}"
             lisat += ["--cache=yes", "--cache-secs=90", "--demuxer-readahead-secs=90", "--demuxer-max-bytes=600MiB"]
             if tapa == "rtx":
                 cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli, lisat, levyn_kesto=valinta_kesto,

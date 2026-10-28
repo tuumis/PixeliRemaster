@@ -87,20 +87,7 @@ r = subprocess.run(cmd, capture_output=True,
                    text=True, encoding="utf-8", errors="replace", timeout=120)
 print("dvd://1 katselu:", r.returncode, r.stdout[-500:], r.stderr[-500:])
 assert r.returncode == 0
-# kestohaku (Blu-ray / MakeMKV-nimike): oletuksena pisin nimike (0), 125 s:n kesto vaihtaa nimikkeeseen 1
-seuraa = kohde.parent / "seuraa.lua"
-seuraa.write_text("""local mp = require "mp"
-local n = 0
-mp.register_event("file-loaded", function()
-    n = n + 1
-    mp.msg.warn("EDITION=" .. tostring(mp.get_property_number("current-edition")))
-    if n >= 2 then mp.command("quit") end
-end)
-mp.add_timeout(20, function() mp.command("quit") end)
-""", encoding="utf-8")
-r = subprocess.run([soitin.mpv_exe(), "--no-config", "--vo=null", "--ao=null", "--msg-level=all=warn",
-                    f"--dvd-device={levyjuuri}", *soitin._nimike_skripti(125), f"--script={seuraa}", "dvd://"],
-                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
-print("kestohaku:", r.stdout[-800:], r.stderr[-300:])
-assert "EDITION=1" in r.stdout + r.stderr, "nimikkeen valinta keston perusteella ei toiminut"
+# kestohaku (Blu-ray / MakeMKV-nimike): kestoltaan lähin nimike levyn omalla numerolla
+ed = levy.soittimen_tiedot("dvd://", f"--dvd-device={levyjuuri}")["editions"]
+assert levy.nimike_kestolla(ed, 125) == 1 and levy.nimike_kestolla(ed, 149) == 0, ed
 print("levytesti OK")
