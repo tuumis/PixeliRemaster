@@ -67,6 +67,12 @@ jobs:
           ./build/python/python.exe installer/soitintesti.py $data
           if ($LASTEXITCODE -ne 0) { throw "soitintesti epäonnistui" }
 
+      - name: Tekstitysten tunnistus (Windowsin OCR)
+        shell: pwsh
+        run: |
+          ./build/python/python.exe installer/ocrtesti.py
+          if ($LASTEXITCODE -ne 0) { throw "ocrtesti epäonnistui" }
+
       - name: Päivitystesti (ohjelman sisäinen päivitys edellisestä julkaisusta)
         shell: pwsh
         env:

@@ -313,6 +313,114 @@ def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi"):
             "--vo=gpu-next", f"--script={skripti}", "--", str(alkuperainen)]
 
 
+KESKEN_TEKSTIT = {
+    "fi": {"alku": "Katsotaan käsittelyn aikana – valmiina {valmis} / {kaikki}",
+           "odottaa": "Odotetaan käsittelyä… seuraava osa valmistuu pian",
+           "jatkuu": "Uusi osa valmis – jatketaan",
+           "ei_viela": "Tätä kohtaa ei ole vielä käsitelty (valmiina {valmis})",
+           "valmis": "Koko elokuva on käsitelty"},
+    "en": {"alku": "Watching while processing – ready {valmis} / {kaikki}",
+           "odottaa": "Waiting for processing… the next part is almost ready",
+           "jatkuu": "New part ready – continuing",
+           "ei_viela": "This part hasn't been processed yet (ready up to {valmis})",
+           "valmis": "The whole movie has been processed"},
+}
+
+_KESKEN_LUA = r"""-- PixeliRemaster: katselu käsittelyn aikana. Lukee tilatiedostoa, lataa uudet valmiit osat,
+-- pysähtyy odottamaan, jos katselu saavuttaa käsittelyn, eikä päästä käsittelemättömään kohtaan.
+local mp = require "mp"
+local utils = require "mp.utils"
+local TILA = %(tila)s
+local T = %(tekstit)s
+local ladattu = 0          -- ladatun kokonaisuuden kuvan kesto (s)
+local odottaa = false
+
+local function lue()
+    local f = io.open(TILA, "r")
+    if not f then return nil end
+    local s = f:read("*a")
+    f:close()
+    return utils.parse_json(s)
+end
+
+local function aika(s)
+    s = math.max(0, math.floor(s))
+    return string.format("%%d:%%02d:%%02d", math.floor(s / 3600), math.floor(s %% 3600 / 60), s %% 60)
+end
+
+local function teksti(m, d)
+    return (m:gsub("{valmis}", aika(d.kesto or 0)):gsub("{kaikki}", aika(d.kesto_kaikki or 0)))
+end
+
+local function lataa_uudelleen(d, kohta, jatka)
+    local tauko = (not jatka) and mp.get_property_bool("pause")
+    local opts = string.format("start=%%.3f,pause=%%s", kohta, tauko and "yes" or "no")
+    local aid, sid = mp.get_property("aid"), mp.get_property("sid")
+    if aid and aid ~= "auto" then opts = opts .. ",aid=" .. aid end
+    if sid and sid ~= "auto" then opts = opts .. ",sid=" .. sid end
+    ladattu = d.kesto
+    mp.set_property_number("audio-delay", -(d.vstart or 0))   -- valmis tiedosto on jo tahdistettu
+    mp.commandv("loadfile", d.edl, "replace", "-1", opts)
+end
+
+local function tarkista()
+    local d = lue()
+    if not d or not d.kesto then return end
+    local kohta = mp.get_property_number("time-pos")
+    if not kohta then return end
+    -- käsittelemättömään kohtaan siirtyminen (esim. aikajanalta)
+    if kohta > ladattu + 0.5 then
+        mp.osd_message(teksti(T.ei_viela, d), 4)
+        if d.kesto > ladattu + 1 then lataa_uudelleen(d, math.max(0, ladattu - 3))
+        else mp.commandv("seek", tostring(math.max(0, ladattu - 3)), "absolute") end
+        return
+    end
+    local uutta = d.kesto > ladattu + 1
+    if odottaa and uutta then
+        odottaa = false
+        mp.osd_message(T.jatkuu, 2)
+        lataa_uudelleen(d, kohta, true)
+    elseif uutta and kohta > ladattu - 20 then
+        lataa_uudelleen(d, kohta)        -- uudet osat mukaan hyvissä ajoin ennen loppua
+    elseif not d.valmis and kohta > ladattu - 1.5 and not odottaa then
+        odottaa = true
+        mp.set_property_bool("pause", true)
+        mp.osd_message(T.odottaa, 3600)
+    elseif odottaa then
+        mp.osd_message(T.odottaa, 3600)
+    end
+end
+
+local alussa = true
+mp.register_event("file-loaded", function()
+    if alussa then
+        alussa = false
+        local d = lue()
+        if d then
+            ladattu = d.kesto or 0
+            mp.osd_message(teksti(d.valmis and T.valmis or T.alku, d), 5)
+        end
+    end
+end)
+mp.add_periodic_timer(1.5, tarkista)
+"""
+
+
+def kesken_skripti(tila_polku, kieli="fi"):
+    t = KESKEN_TEKSTIT.get(kieli, KESKEN_TEKSTIT["en"])
+    taulu = "{" + ", ".join(f"{k} = {_lua_jono(v)}" for k, v in t.items()) + "}"
+    return _KESKEN_LUA % {"tila": _lua_jono(str(tila_polku)), "tekstit": taulu}
+
+
+def komento_kesken(tila_polku, nimi, kieli="fi"):
+    d = json.loads(Path(tila_polku).read_text(encoding="utf-8"))
+    skripti = kansio() / "pixeli_kesken.lua"
+    skripti.parent.mkdir(parents=True, exist_ok=True)
+    skripti.write_text(kesken_skripti(tila_polku, kieli), encoding="utf-8")
+    return [mpv_exe(), *_yhteiset(f"{nimi} – käsittelyn aikana"), "--hwdec=auto-safe", "--vid=1",
+            f"--audio-delay={-float(d.get('vstart') or 0):.3f}", f"--script={skripti}", "--", d["edl"]]
+
+
 def kaynnista(cmd):
     m.loki("mpv: " + " ".join(str(c) for c in cmd[1:4]) + " …")
     return subprocess.Popen([str(c) for c in cmd], creationflags=0x00000200 if os.name == "nt" else 0)

@@ -49,6 +49,25 @@ for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
         assert "lua error" not in loki.lower() and "RTX-tila:" in loki, loki
     else:
         assert p.returncode == 0, loki
+# katselu käsittelyn aikana: osat + alkuperäinen EDL-kokonaisuutena, tilaskripti
+import json  # noqa: E402
+wd = data / "kesken"
+(wd / "osat").mkdir(parents=True, exist_ok=True)
+for i in range(2):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(2 * i), "-t", "2", "-i", str(remaster), "-an",
+                    "-c:v", "copy", str(wd / "osat" / f"osa_{i:04d}.mkv")], check=True)
+(wd / "osat" / "osat.json").write_text(json.dumps({"maarat": {"0": 50, "1": 50}}), encoding="utf-8")
+tila = m.katselutiedot(alkup, {"R": "25/1", "kesto": 4.0, "vstart": 0.0}, wd)
+print((wd / "katselu.edl").read_text(encoding="utf-8"))
+cmd = soitin.komento_kesken(tila, "testi", "fi")
+cmd = cmd[:-2] + ["--vo=null", "--ao=null", "--frames=60", "--msg-level=all=warn,pixeli_kesken=info"] + cmd[-2:]
+cmd = [c for c in cmd if not str(c).startswith(("--force-window", "--keep-open"))]
+p = subprocess.run([str(c) for c in cmd], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   timeout=120)
+loki = (p.stdout + p.stderr)[-1500:]
+print(f"--- kesken: paluukoodi {p.returncode}\n{loki}")
+assert p.returncode == 0 and "lua error" not in loki.lower() and "edl" not in loki.lower(), loki
+
 # päivitys asetuksista: avoin soitin estää vaihdon eikä riko vanhaa versiota
 import time  # noqa: E402
 from pixeli import tyokalut  # noqa: E402

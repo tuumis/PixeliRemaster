@@ -259,7 +259,7 @@ function tyoAllekirjoitus(x) {
   return JSON.stringify([KIELI, x.id, x.tila, !!x.analyysi, x.koe && x.koe.tila, x.koe && x.koe.tunniste,
     (x.valinta || {}).asetus, (x.valinta || {}).dar, (x.valinta || {}).skaala, (x.valinta || {}).kierto, (x.valinta || {}).muoto,
     (x.valinta || {}).laatu, (x.valinta || {}).aanet, (x.valinta || {}).tekstit, (x.valinta || {}).ulkoiset, x.geo && [x.geo.ow, x.geo.oh], x.virhe,
-    (x.valinta || {}).naarmut, (x.valinta || {}).vari, !!x.polku,
+    (x.valinta || {}).naarmut, (x.valinta || {}).vari, !!x.polku, (x.valinta || {}).puhe, (x.valinta || {}).ocr,
     x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, x.liike && x.liike.tila, x.koe && x.koe.aika,
     x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan, (TILA.jono.asetukset || {}).teho,
     TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length]);
@@ -320,6 +320,16 @@ function raidatHtml(x, muokattava) {
       ${ulk.map(n => `<label class="valinta"><input type="checkbox" data-raita="ulkoiset" ${v.ulkoiset === false ? "" : "checked"} ${ei}><span>${esc(n)} (${t("raita.ulkoinen")})</span></label>`).join("")}` : ""}
   </details>`;
 }
+function lisaraidatHtml(x, muokattava) {
+  const an = x.analyysi, v = x.valinta || {}, ei = muokattava ? "" : "disabled";
+  const aania = (an.aaniraidat || []).length;
+  const dvdTekstit = (an.tekstiraidat || []).filter(r => r.koodekki === "dvd_subtitle").length;
+  if (!aania && !dvdTekstit) return "";
+  const ruutu = (id, paalla, teksti, selite) => `<label class="ruutu" title="${esc(selite)}"><input type="checkbox" id="${id}" ${paalla ? "checked" : ""} ${ei}> ${teksti}</label>`;
+  return `<div class="valinta-rivi lisaraidat"><label>${t("lisaraidat.otsikko")}</label><span class="valintaruudut">
+    ${aania ? ruutu("puhe", v.puhe !== false, t("lisaraidat.puhe"), t("lisaraidat.puhe_selite")) : ""}
+    ${dvdTekstit ? ruutu("ocr", v.ocr !== false, t("lisaraidat.ocr"), t("lisaraidat.ocr_selite")) : ""}</span></div>`;
+}
 function laatuTeksti(k) {
   return [t("laatu.kohina." + k.kohina), t("laatu.lohkot." + k.lohkot), t("laatu.teravyys." + k.teravyys)].join(" · ");
 }
@@ -374,8 +384,9 @@ function tyoHtml(x) {
     <div class="tyo-toiminnot"><button class="painike pieni haamu" id="poista">${t("toiminto.poista")}</button>${katsoHtml(x)}${toimintoHtml(x)}</div></div>`;
   let tila = "";
   if (x.tila === "kasitellaan" || (x.tila === "keskeytetty" && x.edistys)) {
+    const katso = onKuva(x) ? "" : `<button class="painike pieni toissijainen" id="katso-kesken" title="${esc(t("soitin.kesken_vihje"))}">${t("soitin.kesken")}</button>`;
     tila = `<div class="kaynnissa" id="kaynnissa"><div class="prosentti" id="k-pros">–</div>
-      <div class="rivit"><span id="k-jaljella"></span><span id="k-nopeus" class="num"></span></div>
+      <div class="rivit"><span id="k-jaljella"></span><span id="k-nopeus" class="num"></span>${katso}</div>
       <div class="edistys"><i id="k-palkki"></i></div></div>`;
   } else if (x.tila === "valmis" && x.tulos) {
     const r = x.tulos;
@@ -384,6 +395,9 @@ function tyoHtml(x) {
     if (r.aika_s) lisat.push(t("valmis.aika", {aika: kesto(r.aika_s)}));
     if ((r.ulkoiset_tekstitykset || []).length) lisat.push(t("valmis.tekstit", {t: r.ulkoiset_tekstitykset.join(", ")}));
     if (r.huomio) lisat.push(t("valmis.huomio." + r.huomio));
+    if (r.puhe) lisat.push(t("valmis.puhe"));
+    if (r.tekstiksi) lisat.push(t("valmis.tekstiksi", {n: r.tekstiksi}));
+    if (r.ocr_virhe) lisat.push(t("valmis.ocr_virhe"));
     const napit = onKuva(x)
       ? `<button class="painike toissijainen" id="nayta-kansio">${t("toiminto.nayta")}</button><button class="painike ensisijainen" id="avaa-kuva">${t("toiminto.avaa_kuva")}</button>`
       : `<button class="painike toissijainen" id="nayta-kansio">${t("toiminto.nayta")}</button>`
@@ -528,7 +542,8 @@ function paneeliHtml(x, n, muokattava) {
         <option value="16:9" ${dar === "16:9" ? "selected" : ""}>${t("kuvasuhde.169")}</option></select></div>
       <div class="valinta-rivi"><label for="laatu">${t("vlaatu.otsikko")}</label>
       <select id="laatu" ${muokattava ? "" : "disabled"} title="${esc(t("vlaatu.selite"))}"><option value="" ${!laatu ? "selected" : ""}>${t("vlaatu.paras")}</option>
-        <option value="pieni" ${laatu === "pieni" ? "selected" : ""}>${t("vlaatu.pieni")}</option></select></div></div>
+        <option value="pieni" ${laatu === "pieni" ? "selected" : ""}>${t("vlaatu.pieni")}</option></select></div>
+      ${lisaraidatHtml(x, muokattava)}</div>
       ${raidatHtml(x, muokattava)}`;
   }
   const saadot = `<div class="osio saadot"><div class="osio-otsikko"><h3>${t("saato.otsikko")}</h3>
@@ -552,7 +567,7 @@ function katsoHtml(x) {
 }
 async function toista(id, tapa) {
   const r = await api("toista", {id, tapa}).catch(e => ({virhe: String(e.message || e)}));
-  if (r.virhe) ilmoita(t(r.virhe === "tiedostoa_ei_loydy" ? "soitin.ei_tiedostoa" : "soitin.virhe"));
+  if (r.virhe) ilmoita(t(r.virhe === "tiedostoa_ei_loydy" ? "soitin.ei_tiedostoa" : r.virhe === "ei_osia" ? "soitin.ei_osia" : "soitin.virhe"));
   else if (r.tila === "ladataan") ilmoita(t("soitin.ladataan", {p: 0}));
   else ilmoita(t("soitin.avataan"));
 }
@@ -632,6 +647,7 @@ function kytkeTyo(x) {
   $("#toista")?.addEventListener("click", () => toista(id, "tulos"));
   $("#vertaa-toistossa")?.addEventListener("click", () => toista(id, "vertaa"));
   $("#katso-nyt")?.addEventListener("click", () => toista(id, "reaali"));
+  $("#katso-kesken")?.addEventListener("click", () => toista(id, "kesken"));
   $("#koe-uudelleen")?.addEventListener("click", () => api("esikatsele", {id}).then(hae));
   $("#paa-toiminto")?.addEventListener("click", async e => {
     const toiminto = e.currentTarget.dataset.toiminto;
@@ -681,6 +697,8 @@ function kytkeTyo(x) {
     });
   }
   $("#laatu")?.addEventListener("change", async e => { await api("valinta", {id, laatu: e.target.value || null}).catch(() => {}); hae(); });
+  $("#puhe")?.addEventListener("change", async e => { await api("valinta", {id, puhe: e.target.checked}).catch(() => {}); hae(); });
+  $("#ocr")?.addEventListener("change", async e => { await api("valinta", {id, ocr: e.target.checked}).catch(() => {}); hae(); });
   $("#raidat")?.addEventListener("toggle", e => { nakyma(id).raidatAuki = e.currentTarget.open; });
   if (nakyma(id).raidatAuki && $("#raidat")) $("#raidat").open = true;
   $$("[data-raita]").forEach(el => el.addEventListener("change", async () => {
@@ -810,7 +828,7 @@ function paivitaDynaamiset(x) {
     const pros = e.kaikki ? 100 * e.tehty / e.kaikki : 0;
     $("#k-pros").textContent = `${luku(Math.min(99.9, pros), pros < 10 ? 1 : 0)} %`;
     $("#k-palkki").style.width = pros + "%";
-    $("#k-jaljella").innerHTML = e.yhdistetaan ? t("kaynnissa.yhdistetaan") : e.tallennetaan ? t("kaynnissa.tallennetaan")
+    $("#k-jaljella").innerHTML = e.tekstit != null ? t("kaynnissa.tekstit", {p: luku(100 * e.tekstit)}) : e.yhdistetaan ? t("kaynnissa.yhdistetaan") : e.tallennetaan ? t("kaynnissa.tallennetaan")
       : e.jaljella_s != null ? t("kaynnissa.jaljella", {aika: esc(onKuva(x) && e.jaljella_s < 60 ? t("kesto.s", {s: Math.max(1, Math.round(e.jaljella_s))}) : kesto(e.jaljella_s))})
       : t(onKuva(x) ? "kaynnissa.kasitellaan_kuva" : "kaynnissa.alkaa");
     $("#k-nopeus").textContent = e.nopeus ? t("kaynnissa.nopeus", {n: luku(e.nopeus, 1)}) : "";

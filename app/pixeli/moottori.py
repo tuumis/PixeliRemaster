@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.7.3"
+VERSIO = "1.8.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -787,26 +787,18 @@ def itsetesti(edistys=None):
         torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32 = vanhat
 
     kirjoita_json(DATA / "itsetesti.json", tulos)   # fp32_mallit käyttöön nopeusmittaukselle
-    # nopeus täysikokoisella DVD-kuvalla
-    L = Laite()
-    xb = L.ops.tensor(np.repeat(testikuva(576, 720), 2, axis=0))
+    # nopeus täysikokoisella DVD-kuvalla. Ensin valitaan tälle näytönohjaimelle nopein laskentatapa
+    # (muistijärjestys ja eräkoko): vaihtoehto otetaan käyttöön vain, jos se on selvästi nopeampi
+    # ja tulos pysyy samana.
+    tulos["optimointi"], tulos["optimointi_mittaukset"] = _valitse_optimointi()
+    kirjoita_json(DATA / "itsetesti.json", tulos)
+    L = Laite(optimointi=tulos["optimointi"])
     for n in ASETUKSET:
         if ASETUKSET[n].get("malli") == "monikuva":
             continue
-        k = kuva.Ketju(L.ops, 576, 720, 1440, 1920, L.asetus(n))
-        with torch.inference_mode():
-            for _ in range(2):
-                L.ops.pakkaa(*k(xb))
-            torch.cuda.synchronize()
-            t = time.time()
-            for i in range(4):
-                L.ops.pakkaa(*k(xb, i * 2))
-            torch.cuda.synchronize()
-        fps = 8 / (time.time() - t)
-        tulos["nopeus"][str(n)] = round(fps, 1)
+        tulos["nopeus"][str(n)] = round(_mittaa_nopeus(L, n, L.era), 1)
         if edistys:
             edistys("nopeus", n, len(ASETUKSET))
-        del k
     from . import lisamallit
     if lisamallit.polku("kohina"):
         D = L.kohinamalli()
@@ -851,6 +843,60 @@ def itsetesti(edistys=None):
 
 
 
+def _mittaa_nopeus(L, n, era, kierrokset=4, tulos_out=None):
+    """Kuvaa sekunnissa: DVD-kuva (720x576) -> 1920x1440 asetuksella n, era kuvaa kerrallaan."""
+    import torch
+    xb = L.ops.from_uint8(np.repeat((testikuva(576, 720)[0].transpose(1, 2, 0) * 255).astype(np.uint8)[None],
+                                    era, axis=0))
+    k = kuva.Ketju(L.ops, 576, 720, 1440, 1920, L.asetus(n))
+    with torch.inference_mode():
+        for _ in range(2):
+            L.ops.pakkaa(*k(xb))
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        for i in range(kierrokset):
+            y = L.ops.pakkaa(*k(xb, i * era))
+        torch.cuda.synchronize()
+        fps = era * kierrokset / (time.perf_counter() - t)
+        if tulos_out is not None:
+            tulos_out.append(np.asarray(y))
+    del k
+    return fps
+
+
+def _valitse_optimointi():
+    """Mittaa suosituimmalla asetuksella (2) vaihtoehdot ja palauttaa nopeimman sekä mittaukset."""
+    import torch
+    vaihtoehdot = [{"kanavat_viimeiseksi": False, "era": 2}, {"kanavat_viimeiseksi": True, "era": 2},
+                   {"kanavat_viimeiseksi": False, "era": 4}, {"kanavat_viimeiseksi": True, "era": 4}]
+    mitatut, viite = [], None
+    for v in vaihtoehdot:
+        try:
+            L = Laite(optimointi=v)
+            ulos = []
+            fps = max(_mittaa_nopeus(L, 2, v["era"], 3, ulos), _mittaa_nopeus(L, 2, v["era"], 3))
+            y = ulos[0].astype(np.int32)
+            if viite is None:
+                viite = y
+            n_ = min(len(viite), len(y))
+            ero = float(np.abs(viite[:n_] - y[:n_]).mean())
+            mitatut.append(dict(v, fps=round(fps, 2), ero=round(ero, 3)))
+            L.vapauta()
+            del L
+            torch.cuda.empty_cache()
+        except Exception as e:  # noqa: BLE001
+            mitatut.append(dict(v, virhe=str(e)[:200]))
+    perus = mitatut[0].get("fps") or 0
+    paras = vaihtoehdot[0]
+    paras_fps = perus
+    for v, mt in zip(vaihtoehdot, mitatut):
+        # vähintään 5 % nopeampi ja sama tulos (10-bittisinä arvoina keskimäärin < 2 yksikön ero)
+        if mt.get("fps") and mt["fps"] > paras_fps * 1.05 and mt.get("ero", 99) < 2.0:
+            paras, paras_fps = v, mt["fps"]
+    loki(f"Laskentatavan valinta: {mitatut} -> {paras}")
+    return dict(paras), mitatut
+
+
 def ulkoiset_tekstitykset(src):
     """Elokuvan vieressä olevat .srt-tiedostot (samanniminen, tai ainoa kansiossa)."""
     kansio = src.parent
@@ -862,9 +908,25 @@ def ulkoiset_tekstitykset(src):
     return srt if len(srt) == 1 and len(videot) == 1 else []
 
 
-def yhdista(src, an, osat, lista, ulos, valinta=None):
-    """Kokoaa valmiin tiedoston: AI-video + alkuperäiset (tai valitut) ääniraidat, tekstitykset ja kappaleet."""
+PUHE_DYNAMIIKKA = ("acompressor=threshold=0.08:ratio=4:attack=10:release=220:makeup=3,"
+                   "dynaudnorm=f=250:g=11:p=0.9:m=6,alimiter=limit=0.89,aresample=48000")
+
+
+def puhe_suodin(kanavat):
+    """Selkeä puhe läppärin kaiuttimille: 5.1-äänestä keskikanava (puhe) korostettuna stereoksi,
+    sitten voimakkuuserojen tasaus (hiljaiset repliikit esiin, räjähdykset hillitymmiksi)."""
+    if int(kanavat or 2) >= 6:
+        alku = "aformat=channel_layouts=5.1,pan=stereo|FL=0.8*FC+0.35*FL+0.25*BL|FR=0.8*FC+0.35*FR+0.25*BR"
+    else:
+        alku = "aformat=channel_layouts=stereo"
+    return f"{alku},{PUHE_DYNAMIIKKA}"
+
+
+def yhdista(src, an, osat, lista, ulos, valinta=None, lisatekstit=None):
+    """Kokoaa valmiin tiedoston: AI-video + alkuperäiset (tai valitut) ääniraidat, tekstitykset ja kappaleet.
+    Lisäksi (valinnaisesti) selkeän puheen stereoraita ja DVD-tekstityksistä tunnistetut tekstiraidat."""
     valinta = valinta or {}
+    lisatekstit = lisatekstit or []
     lista.write_text("".join("file '" + str(p.resolve()).replace("'", "'\\''") + "'\n" for p in osat),
                      encoding="utf-8")
     tmp = ulos.with_name(ulos.stem + ".kesken.mkv")
@@ -876,14 +938,36 @@ def yhdista(src, an, osat, lista, ulos, valinta=None):
              "-itsoffset", f"{an['vstart']:.6f}", "-f", "concat", "-safe", "0", "-i", lista, "-i", src]
     for s_ in srt:
         pohja += (["-i", s_] if _utf8(s_) else ["-sub_charenc", "CP1252", "-i", s_])
+    for t_ in lisatekstit:
+        pohja += ["-i", str(t_["srt"])]
+    ar = an.get("aaniraidat") or []
+    puhe = []
+    if valinta.get("puhe") is not False and ar:
+        li = int(aanet[0]) if aanet else 0
+        r = next((x for x in ar if int(x.get("i", -1)) == li), ar[0])
+        na = len(ar) if aanet is None else len(aanet)
+        puhe = ["-filter_complex", f"[1:a:{li}]{puhe_suodin(r.get('kanavat'))}[puhe]", "-map", "[puhe]",
+                f"-c:a:{na}", "aac", f"-b:a:{na}", "192k", f"-metadata:s:a:{na}", "title=Selkeä puhe (stereo)",
+                f"-metadata:s:a:{na}", f"language={r.get('kieli') or 'und'}", f"-disposition:a:{na}", "default"]
+        for i in range(na):
+            puhe += [f"-disposition:a:{i}", "0"]
     loppu = ["-map_metadata", "1", "-map_chapters", "1", "-max_interleave_delta", "0",
-             "-metadata:s:v:0", "title=PixeliRemaster", tmp]
+             "-metadata:s:v:0", "title=PixeliRemaster", "-disposition:v:0", "default", tmp]
     ns = int(an.get("tekstityksia", 0)) if tekstit is None else len(tekstit)
 
     def ulkoiset(alku):
         m = []
         for j in range(len(srt)):
             m += ["-map", f"{2 + j}:s:0", f"-c:s:{alku + j}", "srt"]
+        if any(t_.get("oletus") for t_ in lisatekstit):
+            for i in range(alku):
+                m += [f"-disposition:s:{i}", "0"]
+        for j, t_ in enumerate(lisatekstit):     # tunnistetut tekstit heti levyn raitojen jälkeen
+            k = alku + len(srt) + j
+            m += ["-map", f"{2 + len(srt) + j}:s:0", f"-c:s:{k}", "srt",
+                  f"-metadata:s:s:{k}", f"title={t_['otsikko']}", f"-metadata:s:s:{k}", f"language={t_['kieli']}"]
+            if t_.get("oletus"):
+                m += [f"-disposition:s:{k}", "default"]
         return m
     yritykset = [
         (["-map", "0:v:0", *a_map, *s_map, "-c", "copy", *ulkoiset(ns)], None),
@@ -894,7 +978,7 @@ def yhdista(src, an, osat, lista, ulos, valinta=None):
         (["-map", "0:v:0", *a_map, "-c", "copy"], "tekstityksiä ei voitu kopioida"),
     ]
     for liput, huom in yritykset:
-        p = aja(pohja + liput + loppu)
+        p = aja(pohja + liput + puhe + loppu)
         if p.returncode == 0:
             break
     else:
@@ -904,7 +988,8 @@ def yhdista(src, an, osat, lista, ulos, valinta=None):
               "levyn sisäisiä tekstityksiä ei voitu kopioida": "tekstit_sisaiset_pois",
               "tekstityksiä ei voitu kopioida": "tekstit_pois"}
     lisatyt = [s_.name for s_ in srt] if huom != "tekstityksiä ei voitu kopioida" else []
-    return {"ulkoiset_tekstitykset": lisatyt, "huomio": koodit.get(huom)}
+    return {"ulkoiset_tekstitykset": lisatyt, "huomio": koodit.get(huom), "puhe": bool(puhe),
+            "tekstiksi": len(lisatekstit) if huom != "tekstityksiä ei voitu kopioida" else 0}
 
 
 def _utf8(p):
@@ -922,17 +1007,23 @@ def _utf8(p):
 class Laite:
     """Näytönohjain (tai testitilassa numpy) ja ladatut mallit. Yksi Laite per säie."""
 
-    def __init__(self, laite=None):
+    def __init__(self, laite=None, optimointi=None):
         laite = laite or os.environ.get("PIXELI_LAITE", "auto")
         self._mallit = {}
         self.lukko = threading.Lock()
+        self.era = 2
         if laite == "numpy":                 # testitila ilman PyTorchia (hyvin hidas)
             self.torch, self.cuda, self.ops = None, False, kuva.NumpyOps()
             return
         import torch
         self.torch = torch
         self.cuda = laite != "cpu" and torch.cuda.is_available()
-        self.ops = kuva.TorchOps("cuda" if self.cuda else "cpu", puolitarkkuus=self.cuda)
+        if optimointi is None:               # itsetestin mittaama nopein tapa tällä koneella
+            optimointi = (lue_json(DATA / "itsetesti.json", {}) or {}).get("optimointi") or {}
+        self.optimointi = dict(optimointi)
+        self.era = int(optimointi.get("era") or 2) if self.cuda else 2
+        self.ops = kuva.TorchOps("cuda" if self.cuda else "cpu", puolitarkkuus=self.cuda,
+                                 kanavat_viimeiseksi=bool(optimointi.get("kanavat_viimeiseksi")))
         if self.cuda:
             torch.backends.cudnn.benchmark = True
 
@@ -1337,6 +1428,75 @@ def arvioi_nopeus(an, geo, n, kohina_kaytossa=False):
     return nop
 
 
+KASITTELY_VERSIO = 2        # vaihdetaan vain, jos osien laskenta muuttuu (muuten keskeneräinen jatkuu päivityksen yli)
+
+
+def dvd_tekstiraidat(an, valinta):
+    """Tekstiksi muunnettavat raidat: valitut (tai kaikki) DVD:n kuvatekstitykset."""
+    if valinta.get("ocr") is False or os.environ.get("PIXELI_OCR") == "pois":
+        return []
+    valitut = valinta.get("tekstit")
+    return [r for r in an.get("tekstiraidat") or []
+            if r.get("koodekki") == "dvd_subtitle" and (valitut is None or r["i"] in valitut)]
+
+
+KIELTEN_NIMET = {"fin": "Suomi", "swe": "Svenska", "eng": "English", "nor": "Norsk", "dan": "Dansk",
+                 "ger": "Deutsch", "deu": "Deutsch", "fre": "Français", "fra": "Français", "spa": "Español",
+                 "ita": "Italiano", "est": "Eesti", "rus": "Русский"}
+
+
+class _OcrTyo:
+    """Tunnistaa DVD-tekstitykset taustasäikeessä videon käsittelyn aikana. Valmiit SRT:t säilyvät
+    keskeytyksen yli. Epäonnistuminen ei estä videon valmistumista (alkuperäiset raidat säilyvät)."""
+
+    def __init__(self, src, an, valinta, wd, peruuta):
+        self.raidat = dvd_tekstiraidat(an, valinta)
+        self.kansio = Path(wd) / "tekstit"
+        self.edistys, self.virhe, self._tulos = 0.0, None, []
+        self._saie = None
+        if not self.raidat or os.name != "nt" and os.environ.get("PIXELI_OCR") != "testi":
+            self.raidat = []
+            return
+        self._saie = threading.Thread(target=self._aja, args=(src, peruuta), name="ocr", daemon=True)
+        self._saie.start()
+
+    def _aja(self, src, peruuta):
+        from . import tekstitys
+        try:
+            tekstitys.varmista_ocr()
+            self.kansio.mkdir(parents=True, exist_ok=True)
+            for j, r in enumerate(self.raidat):
+                kohde = self.kansio / f"s{r['i']}.srt"
+                if not kohde.exists():
+                    tmp = kohde.with_suffix(".kesken")
+
+                    def ed(f, j=j):
+                        self.edistys = (j + f) / len(self.raidat)
+                    _, n = tekstitys.tee_srt(src, r["i"], r.get("kieli"), tmp, ed, peruuta)
+                    tmp.replace(kohde)
+                    loki(f"Tekstitys {r['i']} ({r.get('kieli')}): {n} tekstiä tunnistettu")
+                kieli = r.get("kieli") or "und"
+                nimi = r.get("nimi") or KIELTEN_NIMET.get(kieli, kieli.upper())
+                self._tulos.append({"srt": kohde, "kieli": kieli, "oletus": bool(r.get("oletus")),
+                                    "otsikko": f"{nimi} (teksti)"})
+        except Peruutettu:
+            pass
+        except Exception as e:  # noqa: BLE001
+            loki(f"Tekstitysten tunnistus epäonnistui: {traceback_teksti()}")
+            self.virhe = str(e)[:200]
+
+    def kaynnissa(self):
+        return self._saie is not None and self._saie.is_alive()
+
+    def tulokset(self):
+        return [t for t in self._tulos if Path(t["srt"]).stat().st_size > 0]
+
+
+def traceback_teksti():
+    import traceback
+    return traceback.format_exc()[-1500:]
+
+
 def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pikkukuva=None):
     """Koko elokuva osissa. Jatkuu keskeytyksestä. Palauttaa yhdistämisen tiedot."""
     n = int(valinta.get("asetus") or an["suositus"])
@@ -1347,7 +1507,8 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
     od = wd / "osat"
     pieni = valinta.get("laatu") == "pieni"
     allekirjoitus = {"asetus": n, "saato": saato, "geo": [geo["rajaus"], geo["ow"], geo["oh"]],
-                     "lomitus": an["lomitus"], "R": an["R"], "N": N, "koodain": koodain("hevc", pieni), "v": VERSIO}
+                     "lomitus": an["lomitus"], "R": an["R"], "N": N, "koodain": koodain("hevc", pieni),
+                     "v": KASITTELY_VERSIO}
     meta = lue_json(od / "osat.json")
     if not meta or meta.get("allekirjoitus") != allekirjoitus:
         shutil.rmtree(od, ignore_errors=True)
@@ -1360,6 +1521,7 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
             pass
     maarat = meta["maarat"]
     tila = {"t0": time.time(), "viim": 0.0, "historia": [(time.time(), sum(maarat.values()))]}
+    ocr = _OcrTyo(src, an, valinta, wd, peruuta)       # tekstitysten tunnistus prosessorilla rinnalla
 
     with L.lukko:
         ketju = L.ketju(geo, n, saato, an)
@@ -1387,7 +1549,7 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
                              "jaljella_s": (arvio - tehty) / nop if nop > 0 else None})
 
                 tmp = od / f"osa_{i:04d}.tmp.mkv"
-                c = aja_osa(src, an, geo, ketju, L.ops, tmp, i * N, N, "hevc", wd / "lokit",
+                c = aja_osa(src, an, geo, ketju, L.ops, tmp, i * N, N, "hevc", wd / "lokit", era=L.era,
                             edistys=ed, peruuta=peruuta, pikkukuva=pikkukuva, pieni=pieni)
                 if c > 0:
                     tmp.replace(od / f"osa_{i:04d}.mkv")
@@ -1395,16 +1557,33 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
                     tmp.unlink()
                 maarat[k] = c
                 kirjoita_json(od / "osat.json", meta)
+                try:
+                    katselutiedot(src, an, wd)
+                except Exception:  # noqa: BLE001
+                    pass
             if c < N:
                 break
             i += 1
         del ketju
     if edistys:
         edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": 0, "yhdistetaan": True})
+    while ocr.kaynnissa():
+        if peruuta is not None and peruuta.is_set():
+            raise Peruutettu()
+        if edistys:
+            edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": 0, "tekstit": ocr.edistys})
+        time.sleep(0.5)
+    lisatekstit = ocr.tulokset()
+    if edistys:
+        edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": 0, "yhdistetaan": True})
     osat = [od / f"osa_{int(j):04d}.mkv" for j in sorted(maarat, key=int) if maarat[j] > 0]
     ulos = Path(ulos)
     ulos.parent.mkdir(parents=True, exist_ok=True)
-    tulos = yhdista(src, an, osat, od / "lista.txt", ulos, valinta)
+    tulos = yhdista(src, an, osat, od / "lista.txt", ulos, valinta, lisatekstit=lisatekstit)
+    # käsittelyn aikana katsova soitin siirtyy valmiiseen tiedostoon (osat poistetaan alla)
+    kirjoita_json(wd / "katselu.json", {"edl": str(ulos), "kesto": float(an.get("kesto") or 0),
+                                        "kesto_kaikki": float(an.get("kesto") or 0), "valmis": True,
+                                        "vstart": 0.0, "aika": time.time()})
     try:
         kesto = float(aja([ffbin("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of",
                            "default=nw=1:nk=1", ulos]).stdout.strip())
@@ -1412,9 +1591,46 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
     except ValueError:
         tulos["kesto_ero"] = None
     shutil.rmtree(od, ignore_errors=True)
+    if ocr.virhe:
+        tulos["ocr_virhe"] = ocr.virhe
     tulos["ulos"] = str(ulos)
     tulos["aika_s"] = round(time.time() - tila["t0"])
     return tulos
+
+
+def _edl_polku(p):
+    s = str(Path(p).resolve())
+    return f"%{len(s.encode('utf-8'))}%{s}"
+
+
+def katselutiedot(src, an, wd, valmis=False):
+    """Käsittelyn aikana katsottava kokonaisuus mpv:lle: valmiit osat peräkkäin (kuva) ja alkuperäinen
+    tiedosto (ääni ja tekstitykset). Palauttaa tilatiedoston polun tai None, jos osia ei vielä ole."""
+    od = Path(wd) / "osat"
+    meta = lue_json(od / "osat.json") or {}
+    maarat = meta.get("maarat") or {}
+    osat = []
+    for j in sorted(maarat, key=int):            # vain yhtenäinen alku: ensimmäiseen puuttuvaan asti
+        if int(j) != len(osat) or maarat[j] <= 0 or not (od / f"osa_{int(j):04d}.mkv").exists():
+            break
+        osat.append((od / f"osa_{int(j):04d}.mkv", maarat[j]))
+    if not osat:
+        return None
+    R = Fraction(an["R"])
+    kesto = sum(c for _, c in osat) / float(R)
+    valmis = valmis or any(0 <= c < round(OSAN_PITUUS_S * R) for c in maarat.values())   # viimeinen osa on lyhyempi
+    rivit = ["# mpv EDL v0", "!new_stream"] + [_edl_polku(p) for p, _ in osat] + ["!new_stream", _edl_polku(src)]
+    edl = Path(wd) / "katselu.edl"
+    tmp = edl.with_suffix(".edl.tmp")
+    tmp.write_text("\n".join(rivit) + "\n", encoding="utf-8")
+    tmp.replace(edl)
+    tila = Path(wd) / "katselu.json"
+    tmpj = tila.with_suffix(".json.tmp")
+    kirjoita_json(tmpj, {"edl": str(edl), "kesto": round(kesto, 3), "kesto_kaikki": float(an.get("kesto") or 0),
+                         "osia": len(osat), "valmis": bool(valmis), "vstart": float(an.get("vstart") or 0),
+                         "aika": time.time()})
+    tmpj.replace(tila)
+    return tila
 
 
 def ulostulo_polku(src, kansio=None, paate=".mkv"):

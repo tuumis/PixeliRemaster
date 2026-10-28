@@ -73,6 +73,19 @@ with torch.inference_mode():
     print(f"::notice title=torchtesti::4x-ketju uint8 ero {ero}")
     assert ut.shape == (90, 120, 3) and ero <= 1
 
+    # 3b) channels_last-muistijärjestys (itsetesti voi valita sen) antaa saman tuloksen koko ketjussa
+    ocl = kuva.TorchOps("cpu", puolitarkkuus=False, kanavat_viimeiseksi=True)
+    for nimi in ("live", "vhs"):
+        sd = kuva.lataa_pth(m.MALLIT / m.MALLITIEDOSTOT[nimi])
+        xu = (m.testikuva(48, 64)[0].transpose(1, 2, 0) * 255).astype(np.uint8)[None].repeat(2, 0)
+        tav = kuva.Ketju(ot, 48, 64, 120, 160, {"malli": kuva.Malli(ot, sd), "ai": 1.0})
+        cl_ = kuva.Ketju(ocl, 48, 64, 120, 160, {"malli": kuva.Malli(ocl, sd), "ai": 1.0})
+        a_ = ot.pakkaa(*tav(ot.from_uint8(xu))).astype(np.int32)
+        b_ = ocl.pakkaa(*cl_(ocl.from_uint8(xu))).astype(np.int32)
+        ero = int(np.abs(a_ - b_).max())
+        print(f"::notice title=torchtesti::{nimi}: channels_last vs tavallinen, suurin ero {ero} (10-bit)")
+        assert a_.shape == b_.shape and ero <= 2, (nimi, ero)
+
 # 4) koko kuvan käsittely (vaatii ffmpegin)
 if m.ffmpeg_ok():
     from PIL import Image

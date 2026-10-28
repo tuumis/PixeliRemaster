@@ -436,16 +436,22 @@ class TorchOps:
     nimi = "torch"
     kaista_alkiot = 1 << 22      # GroupNormin kaistan koko suurilla kuvilla
 
-    def __init__(self, laite="cuda", puolitarkkuus=True):
+    def __init__(self, laite="cuda", puolitarkkuus=True, kanavat_viimeiseksi=False):
         import torch
         import torch.nn.functional as F
         self.torch, self.F = torch, F
         self.dev = torch.device(laite)
         self.ht = puolitarkkuus and self.dev.type == "cuda"
+        # channels_last: näytönohjaimen Tensor-ytimet laskevat konvoluutiot usein nopeammin NHWC-muodossa
+        # (itsetesti mittaa ja valitsee nopeamman)
+        self.cl = bool(kanavat_viimeiseksi)
         self._gen = None
 
     def param(self, a):
-        return self.torch.from_numpy(np.ascontiguousarray(np.asarray(a, np.float32))).to(self.dev)
+        t = self.torch.from_numpy(np.ascontiguousarray(np.asarray(a, np.float32))).to(self.dev)
+        if self.cl and t.ndim == 4:
+            t = t.contiguous(memory_format=self.torch.channels_last)
+        return t
 
     def tensor(self, a):
         return self.param(a)
@@ -518,6 +524,8 @@ class TorchOps:
 
     def from_uint8(self, a):
         t = self.torch.from_numpy(a).to(self.dev, non_blocking=True)
+        if self.cl:                    # (n,h,w,3) on valmiiksi channels_last-muistijärjestyksessä
+            return t.permute(0, 3, 1, 2).float().div_(255.0)
         return t.permute(0, 3, 1, 2).float().div_(255.0).contiguous()
 
     def half(self, x):

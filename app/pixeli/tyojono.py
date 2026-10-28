@@ -321,6 +321,9 @@ class Jono:
             for k in ("naarmut", "vari"):          # vanhan kuvan korjaukset
                 if k in valinta:
                     v[k] = True if valinta[k] else None
+            for k in ("puhe", "ocr"):              # oletuksena päällä: tallennetaan vain poisvalinta
+                if k in valinta:
+                    v[k] = False if valinta[k] is False else None
             t["valinta"] = {k: x for k, x in v.items() if x is not None}
             if t.get("analyysi"):
                 vanha = (t.get("koe") or {}).get("tunniste")
@@ -338,7 +341,8 @@ class Jono:
             v = dict(lahde.get("valinta") or {})
             if not v.get("asetus") and lahde.get("analyysi"):
                 v["asetus"] = lahde["analyysi"]["suositus"]
-            kopio = {k: v.get(k) for k in ("asetus", "saato", "skaala", "muoto", "laatu", "naarmut", "vari")}
+            kopio = {k: v.get(k) for k in ("asetus", "saato", "skaala", "muoto", "laatu", "naarmut", "vari", "puhe",
+                                           "ocr")}
             n = 0
             for t in self.tyot:
                 if t is lahde or t.get("laji") != lahde.get("laji") or t["tila"] not in ("odottaa", "keskeytetty", "virhe"):

@@ -161,6 +161,18 @@ assert "[vid2]bwdif" in _g and "crop=720:432:0:72" in _g and _g.endswith("[aid1]
 assert _so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440) == "@rtx:d3d11vpp=deint=yes:interlaced-only=yes:scale=2.5:scaling-mode=nvidia"
 _lua = _so.rtx_skripti(_so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440), "fi")
 assert 'local SKAALA = 2.5' in _lua and "RTX-parannus PÄÄLLÄ" in _lua and "%%" not in _lua and _lua.count("(") == _lua.count(")")
+from pixeli import tekstitys as _tx  # noqa: E402
+_t = np.zeros((24, 90), bool); _t[6:18, 5:20] = True; _t[8:10, 40:85] = True  # noqa: E702
+_r = np.zeros_like(_t)
+for _dy in (-1, 0, 1):
+    for _dx in (-1, 0, 1):
+        _r |= np.roll(np.roll(_t, _dy, 0), _dx, 1)
+_ind = np.zeros(_t.shape, np.uint8); _ind[_r] = 2; _ind[_t] = 1  # noqa: E702
+_s = _tx.pura_spu(_tx.koodaa_spu(_ind, 120, 450, 2.5))
+assert (_s["indeksit"] == _ind).all() and abs(_s["loppu"] - 2.5) < 0.02 and (_s["x"], _s["y"]) == (120, 450)
+assert int((_tx.tekstikuva(_s, 1) == 0).sum()) == int(_t.sum())          # täyte erotettu reunuksesta
+assert _tx.siisti("Hei ,  maailma !\n-Mitä?") == "Hei, maailma!\n- Mitä?", _tx.siisti("Hei ,  maailma !\n-Mitä?")
+assert "pan=stereo" in m.puhe_suodin(6) and "pan" not in m.puhe_suodin(2)
 print("levy ja soitin OK")
 
 ymp = asennus.Ymparisto()

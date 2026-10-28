@@ -108,7 +108,7 @@ class Sovellus:
             return {}
         if polku == "valinta":
             j.aseta_valinta(d["id"], {k: d[k] for k in ("asetus", "saato", "dar", "skaala", "kierto", "muoto", "laatu",
-                                                        "aanet", "tekstit", "ulkoiset", "naarmut", "vari") if k in d})
+                                                        "aanet", "tekstit", "ulkoiset", "naarmut", "vari", "puhe", "ocr") if k in d})
             return {}
         if polku == "esikatsele":
             j.esikatsele(d["id"])
@@ -186,6 +186,15 @@ class Sovellus:
         j = self.jono
         with j.lukko:
             t = dict(j._tyo(tid))
+            wd = j._wd(j._tyo(tid))
+        k = j.asetukset.get("kieli") or "auto"
+        kieli = self.kieli_jarjestelma if k == "auto" else k
+        if tapa == "kesken":
+            tila = m.katselutiedot(Path(t["polku"]), t["analyysi"], wd)
+            if not tila:
+                raise KeyError("ei_osia")
+            nimi = Path(t["polku"]).stem
+            return soitin.varmista_ja_kaynnista(lambda: soitin.komento_kesken(tila, nimi, kieli))
         an, geo = t.get("analyysi"), t.get("geo")
         tulos = (t.get("tulos") or {}).get("ulos")
         nimi = Path(t.get("polku") or t.get("nimi") or "").stem
@@ -200,8 +209,6 @@ class Sovellus:
             tee = lambda: soitin.komento_vertaa(tulos, t["polku"], an, geo, nimi)  # noqa: E731
         else:
             korkeus = j.kohde()[1]
-            k = j.asetukset.get("kieli") or "auto"
-            kieli = self.kieli_jarjestelma if k == "auto" else k
             tee = lambda: soitin.komento_reaaliaika(t["polku"], an or {}, korkeus, nimi, kieli)  # noqa: E731
         return soitin.varmista_ja_kaynnista(tee)
 
