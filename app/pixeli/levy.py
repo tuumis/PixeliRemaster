@@ -418,7 +418,7 @@ def rippaa_dvd(asema, nimike, kesto, kansio, edistys=None, peruuta=None, arvio=0
         raise m.Peruutettu()
     loki = m.DATA / "lokit"
     loki.mkdir(parents=True, exist_ok=True)
-    cmd = [exe, "--no-config", "--quiet", "--msg-level=all=info", f"--dvd-device={laite}", f"--stream-dump={vob}",
+    cmd = [exe, "--no-config", "--quiet", "--msg-level=all=v", f"--dvd-device={laite}", f"--stream-dump={vob}",
            f"dvd://{int(nimike)}"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=m.PIILOTA)
 
@@ -453,7 +453,12 @@ def rippaa_dvd(asema, nimike, kesto, kansio, edistys=None, peruuta=None, arvio=0
             pass
         raise m.Peruutettu()
     if p.returncode != 0 or not vob.exists() or vob.stat().st_size < 1_000_000:
-        raise RuntimeError(f"dvd_kopiointi_epaonnistui ({p.returncode})")
+        try:
+            hanta = (loki / "levy_kopiointi.log").read_bytes()[-1500:].decode("utf-8", "replace")
+        except OSError:
+            hanta = ""
+        raise RuntimeError(f"dvd_kopiointi_epaonnistui ({p.returncode}, "
+                           f"{vob.stat().st_size if vob.exists() else -1} t): {hanta}")
     # MPEG-PS -> MKV (kaikki raidat sellaisenaan, kielet ja luvut levyltä)
     if edistys:
         edistys(0.96)
