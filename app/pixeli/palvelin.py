@@ -156,11 +156,9 @@ class Sovellus:
                 asennus.avaa_kansio(kohde)
             return {}
         if polku == "levy_asemat":
-            if not levy.makemkvcon():
-                return {"makemkv": False, "asemat": []}
-            return {"makemkv": True, "asemat": levy.asemat()}
+            return levy.kaikki_asemat()
         if polku == "levy_nimikkeet":
-            return levy.nimikkeet(int(d["indeksi"]))
+            return levy.nimikkeet_asemalta(d.get("asema") or "", d.get("laji"))
         if polku == "levy_katso":
             if j._ripattava:
                 raise RuntimeError("asema_kaytossa")
@@ -168,12 +166,14 @@ class Sovellus:
             kieli = self.kieli_jarjestelma if k == "auto" else k
             return soitin.katso_levylta(d.get("asema") or "", d.get("kesto") or 0, bool(d.get("bluray")),
                                         j.kohde()[1], levy.turvallinen_nimi(d.get("levy") or ""), kieli,
-                                        j.asetukset.get("katselu") or "oma")
+                                        j.asetukset.get("katselu") or "oma",
+                                        nimike=d.get("nimike") if d.get("tapa") == "oma" else None)
         if polku == "levy_lisaa":
             if soitin.SUORA["tila"] in ("avataan", "toistetaan"):
                 raise RuntimeError("asema_kaytossa")
-            return j.lisaa_levylta(int(d["indeksi"]), int(d["nimike"]), d.get("levy") or "", d.get("kesto") or 0,
-                                   bool(d.get("kasittele", True)), bool(d.get("sailyta", True)))
+            return j.lisaa_levylta(d.get("indeksi"), int(d["nimike"]), d.get("levy") or "", d.get("kesto") or 0,
+                                   bool(d.get("kasittele", True)), bool(d.get("sailyta", True)),
+                                   asema=d.get("asema") or "", tapa=d.get("tapa") or "makemkv", koko=d.get("koko") or 0)
         if polku == "tyokalut":
             return tyokalut.tiedot()
         if polku == "tyokalut_paivita":

@@ -51,5 +51,5 @@ Varjostimet ovat muuttamattomia. / The shaders are unmodified.
 | FFmpeg (BtbN builds) | GPL | ladataan ensimmäisellä käynnistyksellä / downloaded on first launch; https://github.com/BtbN/FFmpeg-Builds |
 | mpv (shinchiro/mpv-winbuild-cmake; sis. libdvdnav, libdvdread, libdvdcss, libbluray) | GPL-2.0+ / LGPL | ladataan ensimmäisellä toistolla / downloaded on first playback; https://mpv.io, https://github.com/shinchiro/mpv-winbuild-cmake |
 | pywinrt (winrt-runtime, winrt-Windows.*) | MIT | ladataan ensimmäisellä tekstitysten tunnistuksella / downloaded on first subtitle recognition; tekstintunnistus on Windowsin oma (Windows.Media.Ocr) |
-| MakeMKV | oma lisenssi / proprietary | ei mukana – käytetään käyttäjän itse asentamaa ohjelmaa / not included – the user's own installation is used; https://www.makemkv.com |
+| MakeMKV | oma lisenssi / proprietary | ei mukana – Blu-ray-levyille käytetään käyttäjän itse asentamaa ohjelmaa / not included – the user's own installation is used for Blu-rays; https://www.makemkv.com |
 | Barlow-kirjasin / typeface | SIL Open Font License 1.1 | `app/web/fontit/OFL.txt` |

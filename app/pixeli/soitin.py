@@ -295,17 +295,19 @@ end)
 -- levyltä toistettaessa: valitaan nimike, jonka kesto on lähinnä valittua (oletus: pisin = pääelokuva)
 local function valitse_nimike()
     if KESTO <= 0 then return end
-    local n = mp.get_property_number("disc-titles/count")
-    if not n or n < 2 then return end
+    -- levyn nimikkeet näkyvät soittimessa editioneina: "title: N (HH:MM:SS.mmm)"
+    local lista = mp.get_property_native("edition-list") or {}
+    if #lista < 2 then return end
     local paras, ero = nil, 1e9
-    for i = 0, n - 1 do
-        local pit = mp.get_property_number("disc-titles/" .. i .. "/length")
-        if pit and math.abs(pit - KESTO) < ero then
-            paras, ero = mp.get_property_number("disc-titles/" .. i .. "/id") or i, math.abs(pit - KESTO)
+    for _, e in ipairs(lista) do
+        local h, mi, s = string.match(e.title or "", "(%%d+):(%%d+):(%%d+)")
+        if h then
+            local pit = tonumber(h) * 3600 + tonumber(mi) * 60 + tonumber(s)
+            if math.abs(pit - KESTO) < ero then paras, ero = e.id, math.abs(pit - KESTO) end
         end
     end
-    if paras and paras ~= mp.get_property_number("disc-title") then
-        pcall(mp.set_property_number, "disc-title", paras)
+    if paras and paras ~= mp.get_property_number("current-edition") then
+        pcall(mp.set_property_number, "edition", paras)
     end
 end
 
@@ -414,16 +416,21 @@ SUORA = {"tila": "ei", "virhe": None}
 _NIMIKE_LUA = r"""local mp = require "mp"
 local KESTO = %(kesto)s
 mp.register_event("file-loaded", function()
-    local n = mp.get_property_number("disc-titles/count")
-    if KESTO <= 0 or not n or n < 2 then return end
+    if KESTO <= 0 then return end
+    -- levyn nimikkeet näkyvät soittimessa editioneina: "title: N (HH:MM:SS.mmm)"
+    local lista = mp.get_property_native("edition-list") or {}
+    if #lista < 2 then return end
     local paras, ero = nil, 1e9
-    for i = 0, n - 1 do
-        local pit = mp.get_property_number("disc-titles/" .. i .. "/length")
-        if pit and math.abs(pit - KESTO) < ero then
-            paras, ero = mp.get_property_number("disc-titles/" .. i .. "/id") or i, math.abs(pit - KESTO)
+    for _, e in ipairs(lista) do
+        local h, mi, s = string.match(e.title or "", "(%%d+):(%%d+):(%%d+)")
+        if h then
+            local pit = tonumber(h) * 3600 + tonumber(mi) * 60 + tonumber(s)
+            if math.abs(pit - KESTO) < ero then paras, ero = e.id, math.abs(pit - KESTO) end
         end
     end
-    if paras and paras ~= mp.get_property_number("disc-title") then pcall(mp.set_property_number, "disc-title", paras) end
+    if paras and paras ~= mp.get_property_number("current-edition") then
+        pcall(mp.set_property_number, "edition", paras)
+    end
 end)
 """
 
@@ -435,9 +442,9 @@ def _nimike_skripti(kesto):
     return [f"--script={p}"]
 
 
-def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi", tapa="oma", piirretty=False):
-    """Levy suoraan soittimeen RTX-parannuksella ilman kopiointia. DVD toistetaan soittimen omalla
-    DVD-tuella (libdvdnav/libdvdread/libdvdcss, kuten VLC:ssä); nimike valitaan keston perusteella.
+def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi", tapa="oma", piirretty=False, nimike=None):
+    """Levy suoraan soittimeen ilman kopiointia. DVD toistetaan soittimen omalla DVD-tuella
+    (libdvdnav/libdvdread/libdvdcss, kuten VLC:ssä): nimike suoraan numerolla (dvd://N), tai keston perusteella.
     Blu-ray toistuu vain, jos levy ei ole suojattu (soittimessa ei ole AACS-purkua)."""
     if SUORA["tila"] in ("avataan", "toistetaan"):
         return dict(SUORA)
@@ -454,12 +461,15 @@ def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi", tapa="o
                 an, url, lisat = {"korkeus": 1080, "lomitus": "progressiivinen"}, "bd://", [f"--bluray-device={laite}"]
             else:
                 an, url, lisat = {"korkeus": 576, "lomitus": "lomitettu"}, "dvd://", [f"--dvd-device={laite}"]
+            valinta_kesto = kesto
+            if not bluray and nimike is not None:
+                url, valinta_kesto = f"dvd://{int(nimike)}", 0        # nimike tiedetään: ei kestohakua
             lisat += ["--cache=yes", "--cache-secs=90", "--demuxer-readahead-secs=90", "--demuxer-max-bytes=600MiB"]
             if tapa == "rtx":
-                cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli, lisat, levyn_kesto=kesto,
+                cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli, lisat, levyn_kesto=valinta_kesto,
                                          lokinimi="mpv_levy")
             else:
-                cmd = komento_oma(url, an, nimi, kieli, lisat + _nimike_skripti(kesto), lokinimi="mpv_levy",
+                cmd = komento_oma(url, an, nimi, kieli, lisat + _nimike_skripti(valinta_kesto), lokinimi="mpv_levy",
                                   piirretty=piirretty)
             m.loki(f"Katsotaan levyltä: {url} {laite} (kesto {kesto} s)")
             SUORA["tila"] = "toistetaan"

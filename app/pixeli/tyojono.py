@@ -196,14 +196,18 @@ class Jono:
         k = self.asetukset.get("ulos_kansio")
         return Path(k) if k else Path.home() / "Videos" / "PixeliRemaster"
 
-    def lisaa_levylta(self, indeksi, nimike, levyn_nimi, kesto=0, kasittele=True, sailyta=True):
+    def lisaa_levylta(self, indeksi, nimike, levyn_nimi, kesto=0, kasittele=True, sailyta=True, asema="",
+                      tapa="makemkv", koko=0):
+        """Levyn nimike kopioidaan jonoon. tapa "oma" = DVD soittimen kirjastoilla, "makemkv" = MakeMKV."""
         from . import levy
         nimi = levy.turvallinen_nimi(levyn_nimi)
         with self.lukko:
             t = {"id": _uusi_id(), "polku": "", "nimi": nimi + ".mkv", "lisatty": time.time(), "laji": "video",
                  "tila": "ripataan", "valinta": {}, "koe": {"tila": "ei"}, "liike": {},
-                 "levy": {"indeksi": int(indeksi), "nimike": int(nimike), "nimi": nimi, "kesto": kesto,
-                          "kasittele": bool(kasittele), "sailyta": bool(sailyta), "edistys": 0.0}}
+                 "levy": {"indeksi": None if indeksi is None else int(indeksi), "nimike": int(nimike), "nimi": nimi,
+                          "kesto": kesto, "asema": str(asema or ""), "tapa": "oma" if tapa == "oma" else "makemkv",
+                          "koko": int(koko or 0), "kasittele": bool(kasittele), "sailyta": bool(sailyta),
+                          "edistys": 0.0}}
             self.tyot.append(t)
         self._levy_q.put(t["id"])
         self._tallenna()
@@ -230,7 +234,11 @@ class Jono:
                     with self.lukko:
                         lv["edistys"] = round(min(1.0, max(0.0, f)), 4)
                 alku = time.time()
-                mkv = levy.rippaa(lv["indeksi"], lv["nimike"], tmp, ed, self._peruuta_levy)
+                if lv.get("tapa") == "oma":
+                    mkv = levy.rippaa_dvd(lv["asema"], lv["nimike"], lv.get("kesto"), tmp, ed, self._peruuta_levy,
+                                          arvio=lv.get("koko") or 0)
+                else:
+                    mkv = levy.rippaa(lv["indeksi"], lv["nimike"], tmp, ed, self._peruuta_levy)
                 kohde = kansio / f"{lv['nimi']}.mkv"
                 n = 2
                 while kohde.exists():
@@ -260,7 +268,8 @@ class Jono:
                 m.loki(f"Levyn kopiointi epäonnistui: {traceback.format_exc()}")
                 with self.lukko:
                     t["tila"] = "virhe"
-                    t["virhe"] = {"avain": "makemkv_puuttuu" if str(e) == "makemkv_puuttuu" else "rippaus",
+                    t["virhe"] = {"avain": "makemkv_puuttuu" if str(e) == "makemkv_puuttuu" else
+                                  "rippaus_dvd" if lv.get("tapa") == "oma" else "rippaus",
                                   "tieto": str(e)[-400:]}
             finally:
                 with self.lukko:

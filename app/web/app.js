@@ -412,7 +412,7 @@ function tyoHtml(x) {
 
   if (x.tila === "ripataan") {
     return `${otsikko}<div class="levy-kortti"><h3>${t("levy.kopioidaan", {n: esc((x.levy || {}).nimi || x.nimi)})}</h3>
-      <p>${t((x.levy || {}).kasittele ? "levy.kopioidaan_selite_auto" : "levy.kopioidaan_selite")}</p>
+      <p>${t(((x.levy || {}).tapa === "oma" ? "levy.kopioidaan_oma" : "levy.kopioidaan") + ((x.levy || {}).kasittele ? "_selite_auto" : "_selite"))}</p>
       <div class="edistys"><i id="levy-palkki" style="width:${(100 * ((x.levy || {}).edistys || 0)).toFixed(1)}%"></i></div></div>`;
   }
   if (!x.analyysi) {
@@ -897,51 +897,57 @@ function piirraLevy() {
   const L = levyTila, c = $("#levy-sisalto"), aloita = $("#levy-aloita");
   aloita.disabled = true;
   $("#levy-katso").disabled = true;
-  if (L.vaihe === "ei_makemkv") {
-    c.innerHTML = `<p>${t("levy.ei_makemkv")}</p><p><code>https://www.makemkv.com/download/</code></p><p>${t("levy.ei_makemkv2")}</p>`;
-  } else if (L.vaihe === "haetaan" || L.vaihe === "luetaan") {
+  const valitsin = (L.asemat || []).length > 1 ? `<p><select id="levy-asema">${L.asemat.map(a => `<option value="${esc(a.asema)}" ${a.asema === L.asema ? "selected" : ""}>${esc(a.asema)} – ${esc(a.levy || "")}</option>`).join("")}</select></p>` : "";
+  const uudelleen = `<button type="button" class="painike toissijainen" id="levy-uudelleen">${t("levy.etsi_uudelleen")}</button>`;
+  if (L.vaihe === "haetaan" || L.vaihe === "luetaan") {
     c.innerHTML = `<p>${t(L.vaihe === "haetaan" ? "levy.haetaan" : "levy.luetaan")}</p><div class="edistys epamaarainen"><i></i></div>`;
   } else if (L.vaihe === "ei_levya") {
-    c.innerHTML = `<p>${t("levy.ei_levya")}</p><button type="button" class="painike toissijainen" id="levy-uudelleen">${t("levy.etsi_uudelleen")}</button>`;
-    $("#levy-uudelleen").addEventListener("click", avaaLevy);
+    c.innerHTML = `<p>${t("levy.ei_levya")}</p>${uudelleen}`;
+  } else if (L.vaihe === "bluray_makemkv") {
+    c.innerHTML = `${valitsin}<p>${t("levy.bluray_makemkv")}</p><p><code>https://www.makemkv.com/download/</code></p><p>${t("levy.bluray_makemkv2")}</p>${uudelleen}`;
+  } else if (L.vaihe === "ei_videolevy") {
+    c.innerHTML = `${valitsin}<p>${t("levy.ei_videolevy")}</p>${uudelleen}`;
   } else if (L.vaihe === "virhe") {
-    c.innerHTML = `<p class="virhe">${t("levy.virhe")}</p>${L.viesti ? `<p><small>${esc(L.viesti)}</small></p>` : ""}<button type="button" class="painike toissijainen" id="levy-uudelleen">${t("levy.etsi_uudelleen")}</button>`;
-    $("#levy-uudelleen").addEventListener("click", avaaLevy);
+    c.innerHTML = `${valitsin}<p class="virhe">${t("levy.virhe")}</p>${L.viesti ? `<p><small>${esc(L.viesti)}</small></p>` : ""}${uudelleen}`;
   } else if (L.vaihe === "nimikkeet") {
-    const asemat = L.asemat.length > 1 ? `<p><select id="levy-asema">${L.asemat.map(a => `<option value="${a.indeksi}" ${a.indeksi === L.indeksi ? "selected" : ""}>${esc(a.asema)} – ${esc(a.levy)}</option>`).join("")}</select></p>` : "";
     const rivit = L.nimikkeet.map(n => `<label class="nimike"><input type="radio" name="levy-nimike" value="${n.id}" ${n.id === L.valittu ? "checked" : ""}>
-        <span>${esc(levyMinuutit(n.kesto))}${n.paaelokuva ? `<span class="merkki-paa">${t("levy.paaelokuva")}</span>` : ""}<br><small>${t("levy.luvut", {n: n.luvut})}${n.lahde ? " · " + esc(n.lahde) : ""}</small></span>
-        <small>${esc(n.koko_teksti)}</small></label>`).join("");
-    c.innerHTML = `${asemat}<p>${t("levy.levy", {n: esc(L.levy || "")})}</p><div class="nimikkeet">${rivit}</div>
+        <span>${esc(levyMinuutit(n.kesto))}${n.paaelokuva ? `<span class="merkki-paa">${t("levy.paaelokuva")}</span>` : ""}<br><small>${n.luvut ? t("levy.luvut", {n: n.luvut}) + " · " : ""}${esc(n.lahde || "")}</small></span>
+        <small>${esc(n.koko_teksti || "")}</small></label>`).join("");
+    c.innerHTML = `${valitsin}<p>${t("levy.levy", {n: esc(L.levy || "")})}</p><div class="nimikkeet">${rivit}</div>
       <div class="valinnat-levy"><label><input type="checkbox" id="levy-kasittele" ${L.kasittele ? "checked" : ""}>${t("levy.kasittele")}</label>
       <label><input type="checkbox" id="levy-sailyta" ${L.sailyta ? "checked" : ""}>${t("levy.sailyta")}</label></div>
-      <p><small>${t("levy.kansio", {k: esc(L.kansio || "")})}</small></p>`;
+      <p><small>${t("levy.kansio", {k: esc(L.kansio || "")})}</small></p>
+      <p><small>${t(L.tapa === "makemkv" ? "levy.tapa_makemkv" : "levy.tapa_oma")}</small></p>`;
     $$('input[name="levy-nimike"]').forEach(r => r.addEventListener("change", () => { L.valittu = Number(r.value); }));
     $("#levy-kasittele").addEventListener("change", e => { L.kasittele = e.target.checked; });
     $("#levy-sailyta").addEventListener("change", e => { L.sailyta = e.target.checked; });
-    $("#levy-asema")?.addEventListener("change", e => lueNimikkeet(Number(e.target.value)));
     aloita.disabled = L.valittu == null;
     $("#levy-katso").disabled = L.valittu == null;
   }
+  $("#levy-uudelleen")?.addEventListener("click", avaaLevy);
+  $("#levy-asema")?.addEventListener("change", e => lueNimikkeet(e.target.value));
 }
 async function katsoLevylta() {
   const L = levyTila, n = (L.nimikkeet || []).find(x => x.id === L.valittu); if (!n) return;
-  const asema = (L.asemat.find(a => a.indeksi === L.indeksi) || {}).polku || "";
-  const r = await api("levy_katso", {indeksi: L.indeksi, asema, kesto: n.kesto, bluray: !!L.bluray, levy: L.levy})
+  const r = await api("levy_katso", {asema: L.asema, nimike: n.id, tapa: L.tapa, kesto: n.kesto, bluray: !!L.bluray, levy: L.levy})
     .catch(e => ({virhe: String(e.message || e)}));
   $("#levy").close();
   if (r.virhe) ilmoita(t(r.virhe === "asema_kaytossa" ? "levy.asema_kaytossa" : "levy.katso_virhe"));
   else ilmoita(t("levy.avataan"));
   hae_kerran();
 }
-async function lueNimikkeet(indeksi) {
-  const L = levyTila; L.indeksi = indeksi; L.vaihe = "luetaan"; piirraLevy();
-  const r = await api("levy_nimikkeet", {indeksi}).catch(e => ({virhe: String(e.message || e), nimikkeet: []}));
+async function lueNimikkeet(asema) {
+  const L = levyTila; L.asema = asema; L.vaihe = "luetaan"; piirraLevy();
+  const a = L.asemat.find(x => x.asema === asema) || {};
+  const r = await api("levy_nimikkeet", {asema, laji: a.laji}).catch(e => ({virhe: String(e.message || e), nimikkeet: []}));
   if (levyTila !== L) return;
-  if (!r.nimikkeet || !r.nimikkeet.length) { L.vaihe = "virhe"; L.viesti = r.virhe || ""; piirraLevy(); return; }
-  const a = L.asemat.find(x => x.indeksi === indeksi) || {};
+  if (!r.nimikkeet || !r.nimikkeet.length) {
+    L.vaihe = ["bluray_makemkv", "ei_videolevy"].includes(r.virhe) ? r.virhe : "virhe";
+    L.viesti = r.virhe === "ei_nimikkeita" || r.virhe === "levya_ei_voitu_lukea" ? "" : (r.virhe || "");
+    piirraLevy(); return;
+  }
   Object.assign(L, {vaihe: "nimikkeet", nimikkeet: r.nimikkeet, levy: r.levy || a.levy || "", valittu: r.nimikkeet[0].id,
-    bluray: !!r.bluray});
+    bluray: !!r.bluray, tapa: r.tapa || "makemkv", indeksi: r.indeksi ?? null});
   piirraLevy();
 }
 async function avaaLevy() {
@@ -952,15 +958,15 @@ async function avaaLevy() {
   const r = await api("levy_asemat").catch(e => ({virhe: String(e.message || e)}));
   if (levyTila !== L) return;
   if (r.virhe) { L.vaihe = "virhe"; L.viesti = r.virhe; piirraLevy(); return; }
-  if (!r.makemkv) { L.vaihe = "ei_makemkv"; piirraLevy(); return; }
   L.asemat = (r.asemat || []).filter(a => a.levy_sisalla);
   if (!L.asemat.length) { L.vaihe = "ei_levya"; piirraLevy(); return; }
-  lueNimikkeet(L.asemat[0].indeksi);
+  const video = L.asemat.find(a => a.laji === "dvd" || a.laji === "bluray") || L.asemat[0];
+  lueNimikkeet(video.asema);
 }
 async function aloitaLevy() {
   const L = levyTila, n = (L.nimikkeet || []).find(x => x.id === L.valittu); if (!n) return;
-  const r = await api("levy_lisaa", {indeksi: L.indeksi, nimike: n.id, levy: L.levy, kesto: n.kesto,
-    kasittele: L.kasittele, sailyta: L.sailyta}).catch(() => null);
+  const r = await api("levy_lisaa", {asema: L.asema, tapa: L.tapa, indeksi: L.indeksi, nimike: n.id, levy: L.levy,
+    kesto: n.kesto, koko: n.koko || 0, kasittele: L.kasittele, sailyta: L.sailyta}).catch(() => null);
   $("#levy").close();
   if (r && r.id) { valittu = r.id; edellinenTyoAllekirjoitus = ""; ilmoita(t("levy.aloitettu")); }
   hae_kerran();

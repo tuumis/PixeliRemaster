@@ -174,7 +174,49 @@ assert int((_tx.tekstikuva(_s, 1) == 0).sum()) == int(_t.sum())          # täyt
 assert _tx.siisti("Hei ,  maailma !\n-Mitä?") == "Hei, maailma!\n- Mitä?", _tx.siisti("Hei ,  maailma !\n-Mitä?")
 assert "pan=stereo" in m.puhe_suodin(6) and "pan" not in m.puhe_suodin(2)
 _rl = _so.rtx_skripti(_so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440), "fi", 6332)
-assert "local KESTO = 6332.0" in _rl and "disc-titles" in _rl and "%%" not in _rl
+assert "local KESTO = 6332.0" in _rl and "edition-list" in _rl and "disc-titles" not in _rl and "%%" not in _rl
+assert '"edition"' in _so._NIMIKE_LUA and "disc-titles" not in _so._NIMIKE_LUA
+# DVD ilman MakeMKV:tä: nimikkeet soittimen editioneista, VIDEO_TS.IFO:n nimiketaulukko, kielet ja luvut
+import struct as _st  # noqa: E402
+import tempfile as _tf  # noqa: E402
+_dvd = _lv.jasenna_dvd({"editions": [{"id": 0, "title": "title: 1 (00:00:15.000)"},
+                                     {"id": 1, "title": "title: 2 (01:45:32.120)"},
+                                     {"id": 2, "title": "title: 3 (00:22:10.000)"}, {"id": 3, "title": "Disc Menu"}],
+                        "tracks": [{"type": "video", "src-id": 224}, {"type": "audio", "src-id": 128, "lang": "en"},
+                                   {"type": "audio", "src-id": 129, "lang": "fi"}, {"type": "sub", "src-id": 32, "lang": "fi"}],
+                        "chapters": [{"time": 0}, {"time": 300.5}, {"time": 900}], "duration": 6332.1},
+                       {1: {"vts": 1, "luvut": 24}, 2: {"vts": 1, "luvut": 3}}, {1: 5_000_000_000})
+assert [x["id"] for x in _dvd["nimikkeet"]] == [1, 2] and _dvd["nimikkeet"][0]["paaelokuva"], _dvd
+assert _dvd["nimikkeet"][0]["luvut"] == 24 and 4.0e9 < _dvd["nimikkeet"][0]["koko"] < 4.3e9, _dvd
+assert _lv.kielimetat([{"index": 0, "id": "0x1e0", "codec_type": "video"}, {"index": 1, "id": "0x20", "codec_type": "subtitle"},
+                       {"index": 2, "id": "0x80", "codec_type": "audio"}, {"index": 3, "id": "0x81", "codec_type": "audio"}],
+                      _dvd["raidat"]) == ["-metadata:s:s:0", "language=fin", "-metadata:s:a:0", "language=eng",
+                                          "-metadata:s:a:1", "language=fin"]
+_lm = _lv.lukumetat(_dvd["luvut"], 6332.1)
+assert _lm.startswith(";FFMETADATA1") and _lm.count("[CHAPTER]") == 3 and "END=6332100" in _lm
+assert _lv.lukumetat([0.0], 100) == ""
+with _tf.TemporaryDirectory() as _d:
+    (Path(_d) / "VIDEO_TS").mkdir()
+    _ifo = bytearray(4096)
+    _ifo[:12] = b"DVDVIDEO-VMG"
+    _ifo[0xC4:0xC8] = _st.pack(">I", 1)
+    _ifo[2048:2056] = _st.pack(">HHI", 2, 0, 31)
+    _ifo[2056:2068] = bytes([0x3C, 1]) + _st.pack(">HH", 12, 0) + bytes([1, 1]) + _st.pack(">I", 0)
+    _ifo[2068:2080] = bytes([0x3C, 1]) + _st.pack(">HH", 4, 0) + bytes([2, 1]) + _st.pack(">I", 0)
+    (Path(_d) / "VIDEO_TS" / "VIDEO_TS.IFO").write_bytes(bytes(_ifo))
+    (Path(_d) / "VIDEO_TS" / "VTS_01_1.VOB").write_bytes(b"x" * 1000)
+    (Path(_d) / "VIDEO_TS" / "VTS_01_2.VOB").write_bytes(b"x" * 500)
+    assert _lv.ifo_nimikkeet(_d) == {0: {"kulmat": 1, "luvut": 12, "vts": 1}, 1: {"kulmat": 1, "luvut": 4, "vts": 2}}
+    assert _lv.vts_koko(_d, 1) == 1500 and _lv.levyn_laji(_d) == "dvd"
+    (Path(_d) / "BDMV").mkdir()
+    assert _lv.levyn_laji(_d) == "bluray"
+# Blu-ray ilman MakeMKV:tä: selkeä viesti; musiikki-/datalevy tunnistetaan
+_mk = _lv.makemkvcon
+_lv.makemkvcon = lambda: None
+assert _lv.nimikkeet_asemalta("X:", "bluray")["virhe"] == "bluray_makemkv"
+assert _lv.nimikkeet_asemalta("X:", "muu")["virhe"] == "ei_videolevy"
+_lv.makemkvcon = _mk
+assert _lv.kesto_otsikosta("title: 3 (01:45:32.120) (00800.mpls)") == 6332
 print("levy ja soitin OK")
 
 ymp = asennus.Ymparisto()
