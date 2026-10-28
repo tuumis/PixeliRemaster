@@ -1,5 +1,5 @@
-**Korjattu 1.9.2:** Katso levyltä ei käynnistynyt: MakeMKV:n suoratoisto käynnistetään nyt sen ohjeen mukaisella tavalla, ja ohjelma odottaa levyn lukemista pidempään. MakeMKV:n viestit tallentuvat lokiin (lokit\\makemkv_suoratoisto.log).
-**Fixed in 1.9.2:** Watch from disc didn't start: MakeMKV streaming is now started as documented, and the program waits longer for the disc to be read. MakeMKV's messages are saved to a log (lokit\\makemkv_suoratoisto.log).
+**Korjattu 1.9.2:** Katso levyltä ei käynnistynyt: MakeMKV:n suoratoisto käynnistetään nyt sen ohjeen mukaisella tavalla, ja ohjelma odottaa levyn lukemista pidempään. MakeMKV:n viestit tallentuvat lokiin (lokit\makemkv_suoratoisto.log).
+**Fixed in 1.9.2:** Watch from disc didn't start: MakeMKV streaming is now started as documented, and the program waits longer for the disc to be read. MakeMKV's messages are saved to a log (lokit\makemkv_suoratoisto.log).
 
 **Korjattu 1.9.1:** ohjelma avautuu suoraan normaaliin näkymään. Käynnistystarkistus tehdään taustalla, eikä "Valmistellaan ensimmäistä käyttöä" -näkymä enää vilahda jokaisella käynnistyksellä (se näytetään vain päivityksen jälkeen tai jos tarkistus löytää ongelman).
 **Fixed in 1.9.1:** the program opens straight to the normal view. The startup check runs in the background, and the "Preparing for first use" screen no longer flashes on every start (it appears only after an update or if the check finds a problem).
