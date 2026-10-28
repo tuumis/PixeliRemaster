@@ -563,7 +563,8 @@ function paneeliHtml(x, n, muokattava) {
 
 function katsoHtml(x) {
   if (onKuva(x) || !x.analyysi || !x.polku) return "";
-  return `<button class="painike pieni toissijainen" id="katso-nyt" title="${esc(t("soitin.reaali_vihje"))}">${t("soitin.reaali")}</button>`;
+  const rtx = (TILA.jono.asetukset || {}).katselu === "rtx";
+  return `<button class="painike pieni toissijainen" id="katso-nyt" title="${esc(t(rtx ? "soitin.reaali_vihje" : "soitin.oma_vihje"))}">${t(rtx ? "soitin.reaali" : "soitin.oma")}</button>`;
 }
 async function toista(id, tapa) {
   const r = await api("toista", {id, tapa}).catch(e => ({virhe: String(e.message || e)}));
@@ -1037,6 +1038,7 @@ function avaaAsetukset() {
   $$('input[name="tallennus"]').forEach(r => { r.checked = (r.value === "kansio") === !!a.ulos_kansio; });
   $("#ulos-kansio").textContent = a.ulos_kansio || t("asetukset.ei_kansiota");
   $$('input[name="kieli"]').forEach(r => { r.checked = r.value === (a.kieli || "auto"); });
+  $$('input[name="katselu"]').forEach(r => { r.checked = r.value === (a.katselu || "oma"); });
   const y = TILA.ymparisto, it = y.itsetesti || {};
   const pv = TILA.paivitys || {};
   const pvTeksti = pv.tila === "ei_kaytossa" ? "" : pv.tila === "saatavilla" ? ` · <a href="#" id="tietoja-paivitys">${t("paivitys.saatavilla", {v: esc(pv.versio || "")})}</a>`
@@ -1053,6 +1055,10 @@ function avaaAsetukset() {
 }
 function kytkeAsetukset() {
   $("#asetukset-nappi").addEventListener("click", avaaAsetukset);
+  $$('input[name="katselu"]').forEach(r => r.addEventListener("change", async () => {
+    TILA.jono.asetukset.katselu = r.value; await api("asetukset", {katselu: r.value}).catch(() => null);
+    edellinenTyoAllekirjoitus = "";
+  }));
   $("#paivitys-nappi").addEventListener("click", avaaPaivitys);
   $("#lisaa-levy").addEventListener("click", avaaLevy);
   $("#levy-aloita").addEventListener("click", aloitaLevy);

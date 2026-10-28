@@ -167,7 +167,8 @@ class Sovellus:
             k = j.asetukset.get("kieli") or "auto"
             kieli = self.kieli_jarjestelma if k == "auto" else k
             return soitin.katso_levylta(d.get("asema") or "", d.get("kesto") or 0, bool(d.get("bluray")),
-                                        j.kohde()[1], levy.turvallinen_nimi(d.get("levy") or ""), kieli)
+                                        j.kohde()[1], levy.turvallinen_nimi(d.get("levy") or ""), kieli,
+                                        j.asetukset.get("katselu") or "oma")
         if polku == "levy_lisaa":
             if soitin.SUORA["tila"] in ("avataan", "toistetaan"):
                 raise RuntimeError("asema_kaytossa")
@@ -218,7 +219,11 @@ class Sovellus:
             tee = lambda: soitin.komento_vertaa(tulos, t["polku"], an, geo, nimi)  # noqa: E731
         else:
             korkeus = j.kohde()[1]
-            tee = lambda: soitin.komento_reaaliaika(t["polku"], an or {}, korkeus, nimi, kieli)  # noqa: E731
+            if (j.asetukset.get("katselu") or "oma") == "rtx":
+                tee = lambda: soitin.komento_reaaliaika(t["polku"], an or {}, korkeus, nimi, kieli)  # noqa: E731
+            else:
+                piirretty = "piirretty" in ((an or {}).get("huomiot") or []) or (an or {}).get("suositus") == 5
+                tee = lambda: soitin.komento_oma(t["polku"], an or {}, nimi, kieli, piirretty=piirretty)  # noqa: E731
         return soitin.varmista_ja_kaynnista(tee)
 
     def media(self, tid, suhteellinen):

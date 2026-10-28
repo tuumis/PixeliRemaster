@@ -37,7 +37,7 @@ class Jono:
         self.ymp = ymparisto
         self.lukko = threading.RLock()
         self.tyot = []
-        self.asetukset = {"kohde": "auto", "ulos_kansio": None, "kieli": "auto", "teho": "taysi"}
+        self.asetukset = {"kohde": "auto", "ulos_kansio": None, "kieli": "auto", "teho": "taysi", "katselu": "oma"}
         self.sammuta_valmiina = False
         self.sammutus_ajastettu = False
         self._peruuta = threading.Event()
@@ -102,7 +102,9 @@ class Jono:
 
     def tallenna_asetukset(self, uudet):
         with self.lukko:
-            for k in ("kohde", "ulos_kansio", "kieli", "teho"):
+            if "katselu" in uudet and uudet["katselu"] not in ("oma", "rtx"):
+                uudet = dict(uudet, katselu="oma")
+            for k in ("kohde", "ulos_kansio", "kieli", "teho", "katselu"):
                 if k in uudet:
                     self.asetukset[k] = uudet[k]
             if "teho" in uudet:

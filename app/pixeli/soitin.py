@@ -331,6 +331,74 @@ def rtx_skripti(suodin, kieli="fi", kesto=0):
                        "varalla": _lua_jono(varalla), "kesto": f"{float(kesto or 0):.1f}"}
 
 
+# ------------------------------------------------------------------ soittimen oma suurennus (ei NVIDIAn asetusta)
+# Avoimen lähdekoodin suurennusmallit mpv:n varjostimina: FSRCNNX (igv, LGPL-3.0) elokuville,
+# Anime4K (bloc97, MIT, "Mode C HQ" pienen tarkkuuden piirretyille) piirretyille. Ne toimivat vain tässä
+# soittimessa, eivätkä vaadi NVIDIAn RTX Video -asetusta.
+VARJOSTIMET = {
+    "elokuva": ["FSRCNNX_x2_16-0-4-1.glsl"],
+    "piirretty": ["Anime4K_Clamp_Highlights.glsl", "Anime4K_Upscale_Denoise_CNN_x2_VL.glsl",
+                  "Anime4K_AutoDownscalePre_x2.glsl", "Anime4K_AutoDownscalePre_x4.glsl",
+                  "Anime4K_Upscale_CNN_x2_M.glsl"],
+}
+OMA_TEKSTIT = {
+    "fi": {"paalla": "Parannus PÄÄLLÄ ({malli})", "pois": "Parannus POIS (tavallinen skaalaus)", "ohje": "N vaihtaa",
+           "elokuva": "FSRCNNX", "piirretty": "Anime4K"},
+    "en": {"paalla": "Enhancement ON ({malli})", "pois": "Enhancement OFF (regular scaling)", "ohje": "N toggles",
+           "elokuva": "FSRCNNX", "piirretty": "Anime4K"},
+}
+
+_OMA_LUA = r"""-- PixeliRemaster: soittimen oma suurennus (varjostimet) päälle/pois
+local mp = require "mp"
+local T = %(tekstit)s
+local MALLI = %(malli)s
+local varjostimet = nil
+local function kerro(paalla, kesto)
+    local lw, lh = 0, 0
+    local v = mp.get_property_native("video-params")
+    if v and v.w then lw, lh = v.w, v.h end
+    local t = paalla and T.paalla:gsub("{malli}", T[MALLI]) or T.pois
+    mp.msg.info("Oma parannus: " .. (paalla and "paalla" or "pois"))
+    mp.osd_message(string.format("%%s  ·  %%dx%%d  ·  %%s", t, lw, lh, T.ohje), kesto)
+end
+mp.register_event("file-loaded", function()
+    if varjostimet == nil then
+        varjostimet = mp.get_property_native("glsl-shaders") or {}
+        mp.add_timeout(0.8, function() kerro(#varjostimet > 0, 5) end)
+    end
+end)
+mp.add_key_binding("n", "pixeli-oma", function()
+    local nyt = mp.get_property_native("glsl-shaders") or {}
+    if #nyt > 0 then
+        mp.set_property_native("glsl-shaders", {})
+        kerro(false, 3)
+    else
+        mp.set_property_native("glsl-shaders", varjostimet or {})
+        kerro(true, 3)
+    end
+end)
+"""
+
+
+def varjostinkansio():
+    return m.SOVELLUS / "shaders"
+
+
+def komento_oma(alkuperainen, an, nimi, kieli="fi", lisat=(), lokinimi="mpv", piirretty=False):
+    laji = "piirretty" if piirretty else "elokuva"
+    t = OMA_TEKSTIT.get(kieli, OMA_TEKSTIT["en"])
+    skripti = kansio() / "pixeli_oma.lua"
+    skripti.parent.mkdir(parents=True, exist_ok=True)
+    taulu = "{" + ", ".join(f"{k} = {_lua_jono(v)}" for k, v in t.items()) + "}"
+    skripti.write_text(_OMA_LUA % {"tekstit": taulu, "malli": _lua_jono(laji)}, encoding="utf-8")
+    polut = [str(varjostinkansio() / f) for f in VARJOSTIMET[laji]]
+    lomitettu = an.get("lomitus") in ("lomitettu", "ivtc", "desimointi")
+    return [mpv_exe(), *_yhteiset(f"{nimi} – reaaliaikainen parannus", lokinimi), "--hwdec=auto-copy",
+            "--vo=gpu-next", "--scale=ewa_lanczossharp", "--cscale=ewa_lanczossharp", "--dscale=mitchell",
+            *(["--vf=@deint:bwdif=deint=interlaced"] if lomitettu else []),
+            *[f"--glsl-shader={p}" for p in polut], f"--script={skripti}", *lisat, "--", str(alkuperainen)]
+
+
 def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=(), levyn_kesto=0, lokinimi="mpv"):
     suodin = rtx_suodin(an, kohde_korkeus)
     skripti = kansio() / "pixeli_rtx.lua"
@@ -343,7 +411,31 @@ def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=
 SUORA = {"tila": "ei", "virhe": None}
 
 
-def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
+_NIMIKE_LUA = r"""local mp = require "mp"
+local KESTO = %(kesto)s
+mp.register_event("file-loaded", function()
+    local n = mp.get_property_number("disc-titles/count")
+    if KESTO <= 0 or not n or n < 2 then return end
+    local paras, ero = nil, 1e9
+    for i = 0, n - 1 do
+        local pit = mp.get_property_number("disc-titles/" .. i .. "/length")
+        if pit and math.abs(pit - KESTO) < ero then
+            paras, ero = mp.get_property_number("disc-titles/" .. i .. "/id") or i, math.abs(pit - KESTO)
+        end
+    end
+    if paras and paras ~= mp.get_property_number("disc-title") then pcall(mp.set_property_number, "disc-title", paras) end
+end)
+"""
+
+
+def _nimike_skripti(kesto):
+    p = kansio() / "pixeli_nimike.lua"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_NIMIKE_LUA % {"kesto": f"{float(kesto or 0):.1f}"}, encoding="utf-8")
+    return [f"--script={p}"]
+
+
+def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi", tapa="oma", piirretty=False):
     """Levy suoraan soittimeen RTX-parannuksella ilman kopiointia. DVD toistetaan soittimen omalla
     DVD-tuella (libdvdnav/libdvdread/libdvdcss, kuten VLC:ssä); nimike valitaan keston perusteella.
     Blu-ray toistuu vain, jos levy ei ole suojattu (soittimessa ei ole AACS-purkua)."""
@@ -362,9 +454,13 @@ def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
                 an, url, lisat = {"korkeus": 1080, "lomitus": "progressiivinen"}, "bd://", [f"--bluray-device={laite}"]
             else:
                 an, url, lisat = {"korkeus": 576, "lomitus": "lomitettu"}, "dvd://", [f"--dvd-device={laite}"]
-            cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli,
-                                     lisat + ["--cache=yes", "--cache-secs=90", "--demuxer-readahead-secs=90",
-                                              "--demuxer-max-bytes=600MiB"], levyn_kesto=kesto, lokinimi="mpv_levy")
+            lisat += ["--cache=yes", "--cache-secs=90", "--demuxer-readahead-secs=90", "--demuxer-max-bytes=600MiB"]
+            if tapa == "rtx":
+                cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli, lisat, levyn_kesto=kesto,
+                                         lokinimi="mpv_levy")
+            else:
+                cmd = komento_oma(url, an, nimi, kieli, lisat + _nimike_skripti(kesto), lokinimi="mpv_levy",
+                                  piirretty=piirretty)
             m.loki(f"Katsotaan levyltä: {url} {laite} (kesto {kesto} s)")
             SUORA["tila"] = "toistetaan"
             alku = time.time()
