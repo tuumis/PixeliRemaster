@@ -166,7 +166,7 @@ class Sovellus:
                 raise RuntimeError("asema_kaytossa")
             k = j.asetukset.get("kieli") or "auto"
             kieli = self.kieli_jarjestelma if k == "auto" else k
-            return soitin.katso_levylta(int(d["indeksi"]), d.get("kesto") or 0, bool(d.get("bluray")),
+            return soitin.katso_levylta(d.get("asema") or "", d.get("kesto") or 0, bool(d.get("bluray")),
                                         j.kohde()[1], levy.turvallinen_nimi(d.get("levy") or ""), kieli)
         if polku == "levy_lisaa":
             if soitin.SUORA["tila"] in ("avataan", "toistetaan"):

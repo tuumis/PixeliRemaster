@@ -173,8 +173,8 @@ assert (_s["indeksit"] == _ind).all() and abs(_s["loppu"] - 2.5) < 0.02 and (_s[
 assert int((_tx.tekstikuva(_s, 1) == 0).sum()) == int(_t.sum())          # täyte erotettu reunuksesta
 assert _tx.siisti("Hei ,  maailma !\n-Mitä?") == "Hei, maailma!\n- Mitä?", _tx.siisti("Hei ,  maailma !\n-Mitä?")
 assert "pan=stereo" in m.puhe_suodin(6) and "pan" not in m.puhe_suodin(2)
-_p = _lv._Solut(); _p.feed('<table><tr><td>titles</td><td><a href="/web/titles">x</a></td></tr><tr><td>duration</td><td>1:45:32</td></tr></table>')
-assert _p.solut == [("titles", None), ("x", "/web/titles"), ("duration", None), ("1:45:32", None)], _p.solut
+_rl = _so.rtx_skripti(_so.rtx_suodin({"korkeus": 576, "lomitus": "lomitettu"}, 1440), "fi", 6332)
+assert "local KESTO = 6332.0" in _rl and "disc-titles" in _rl and "%%" not in _rl
 print("levy ja soitin OK")
 
 ymp = asennus.Ymparisto()

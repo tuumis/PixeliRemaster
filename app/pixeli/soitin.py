@@ -213,6 +213,7 @@ local mp = require "mp"
 local SUODIN = %(suodin)s
 local VARALLA = %(varalla)s
 local SKAALA = %(skaala)s
+local KESTO = %(kesto)s
 local T = %(tekstit)s
 local paalla = false
 local tuettu = true
@@ -230,10 +231,12 @@ local function ilmoita(tila, teksti, kesto)
 end
 
 -- parannus on käytössä, kun suodin on suurentanut kuvan (lähde -> ulostulo)
-local function kerro(kesto)
+local function kerro(kesto, viimeinen)
     local lw, lh = koko("video-params")
     local ow, oh = koko("video-out-params")
     if not lw or not ow then return false end
+    -- ulostulon koko päivittyy suodinketjun uudelleenrakennuksen jälkeen viiveellä: odotetaan
+    if paalla and SKAALA >= 1.05 and oh <= lh * 1.05 and not viimeinen then return false end
     if SKAALA < 1.05 then
         ilmoita("ei_tarvetta", T.ei_tarvetta, kesto)
     elseif paalla and oh > lh * 1.05 then
@@ -251,7 +254,7 @@ local function kerro_pian(kesto)
     local yritykset = 0
     local function yrita()
         yritykset = yritykset + 1
-        if not kerro(kesto) and yritykset < 12 then mp.add_timeout(0.25, yrita) end
+        if not kerro(kesto, yritykset >= 16) and yritykset < 16 then mp.add_timeout(0.25, yrita) end
     end
     mp.add_timeout(0.3, yrita)
 end
@@ -284,9 +287,27 @@ mp.add_key_binding("n", "pixeli-rtx", function()
     end
 end)
 
+-- levyltä toistettaessa: valitaan nimike, jonka kesto on lähinnä valittua (oletus: pisin = pääelokuva)
+local function valitse_nimike()
+    if KESTO <= 0 then return end
+    local n = mp.get_property_number("disc-titles/count")
+    if not n or n < 2 then return end
+    local paras, ero = nil, 1e9
+    for i = 0, n - 1 do
+        local pit = mp.get_property_number("disc-titles/" .. i .. "/length")
+        if pit and math.abs(pit - KESTO) < ero then
+            paras, ero = mp.get_property_number("disc-titles/" .. i .. "/id") or i, math.abs(pit - KESTO)
+        end
+    end
+    if paras and paras ~= mp.get_property_number("disc-title") then
+        pcall(mp.set_property_number, "disc-title", paras)
+    end
+end
+
 mp.register_event("file-loaded", function()
     if aloitettu then return end
     aloitettu = true
+    pcall(valitse_nimike)
     if kayttoon() then kerro_pian(5) end
 end)
 """
@@ -296,20 +317,20 @@ def _lua_jono(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def rtx_skripti(suodin, kieli="fi"):
+def rtx_skripti(suodin, kieli="fi", kesto=0):
     t = RTX_TEKSTIT.get(kieli, RTX_TEKSTIT["en"])
     taulu = "{" + ", ".join(f"{k} = {_lua_jono(v)}" for k, v in t.items()) + "}"
     r = re.search(r"scale=([0-9.]+)", suodin)
     varalla = "@varalla:bwdif=deint=interlaced" if "deint=yes" in suodin else ""
     return _RTX_LUA % {"suodin": _lua_jono(suodin), "tekstit": taulu, "skaala": r.group(1) if r else "1",
-                       "varalla": _lua_jono(varalla)}
+                       "varalla": _lua_jono(varalla), "kesto": f"{float(kesto or 0):.1f}"}
 
 
-def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=()):
+def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=(), levyn_kesto=0):
     suodin = rtx_suodin(an, kohde_korkeus)
     skripti = kansio() / "pixeli_rtx.lua"
     skripti.parent.mkdir(parents=True, exist_ok=True)
-    skripti.write_text(rtx_skripti(suodin, kieli), encoding="utf-8")
+    skripti.write_text(rtx_skripti(suodin, kieli, levyn_kesto), encoding="utf-8")
     return [mpv_exe(), *_yhteiset(f"{nimi} – reaaliaikainen parannus"), "--hwdec=d3d11va", "--gpu-api=d3d11",
             "--vo=gpu-next", f"--script={skripti}", *lisat, "--", str(alkuperainen)]
 
@@ -317,44 +338,37 @@ def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=
 SUORA = {"tila": "ei", "virhe": None}
 
 
-def katso_levylta(indeksi, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
-    """Levyn nimike suoraan MakeMKV:n suoratoistosta soittimeen RTX-parannuksella (ei kopiointia).
-    Suoratoistopalvelin sammutetaan, kun soitin suljetaan."""
-    from . import levy
+def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
+    """Levy suoraan soittimeen RTX-parannuksella ilman kopiointia. DVD toistetaan soittimen omalla
+    DVD-tuella (libdvdnav/libdvdread/libdvdcss, kuten VLC:ssä); nimike valitaan keston perusteella.
+    Blu-ray toistuu vain, jos levy ei ole suojattu (soittimessa ei ole AACS-purkua)."""
     if SUORA["tila"] in ("avataan", "toistetaan"):
         return dict(SUORA)
     SUORA.update({"tila": "avataan", "virhe": None})
 
     def saie():
-        st = None
         try:
             if not mpv_exe():
                 TILA.update({"tila": "ladataan", "edistys": 0.0, "virhe": None})
                 lataa(lambda f: TILA.update({"edistys": round(f, 3)}))
                 TILA.update({"tila": "valmis", "edistys": 1.0})
-            st = levy.Suoratoisto(indeksi)
-            nimikkeet = []
-            for _ in range(40):                       # levyn luku voi jatkua vielä palvelimen käynnistyttyä
-                nimikkeet = levy.suoratoiston_nimikkeet(st.juuri)
-                if nimikkeet:
-                    break
-                time.sleep(2)
-            if not nimikkeet:
-                raise RuntimeError("suoratoisto_ei_nimikkeita: " + " | ".join(st.viestit[-3:]))
-            valittu = min(nimikkeet, key=lambda n: abs(n["kesto"] - float(kesto or 0)))
-            an = {"korkeus": 1080, "lomitus": "progressiivinen"} if bluray else {"korkeus": 576, "lomitus": "lomitettu"}
-            cmd = komento_reaaliaika(valittu["url"], an, kohde_korkeus, nimi, kieli,
-                                     ["--cache=yes", "--demuxer-max-bytes=300MiB", "--demuxer-readahead-secs=30"])
-            m.loki(f"Katsotaan levyltä: nimike {valittu['i']} ({valittu['kesto']} s)")
+            laite = str(asema or "").rstrip("\\/")
+            if bluray:
+                an, url, lisat = {"korkeus": 1080, "lomitus": "progressiivinen"}, "bd://", [f"--bluray-device={laite}"]
+            else:
+                an, url, lisat = {"korkeus": 576, "lomitus": "lomitettu"}, "dvd://", [f"--dvd-device={laite}"]
+            cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli,
+                                     lisat + ["--cache=yes", "--demuxer-readahead-secs=20"], levyn_kesto=kesto)
+            m.loki(f"Katsotaan levyltä: {url} {laite} (kesto {kesto} s)")
             SUORA["tila"] = "toistetaan"
-            kaynnista(cmd).wait()
+            alku = time.time()
+            koodi = kaynnista(cmd).wait()
+            if koodi not in (0, None) and time.time() - alku < 20:
+                raise RuntimeError("bluray_suojattu" if bluray else "levy_ei_auennut")
             SUORA["tila"] = "ei"
         except Exception as e:  # noqa: BLE001
             m.loki(f"Levyltä katselu epäonnistui: {e}")
             SUORA.update({"tila": "virhe", "virhe": str(e)[:300]})
-        finally:
-            if st:
-                st.lopeta()
     threading.Thread(target=saie, name="levylta", daemon=True).start()
     return dict(SUORA)
 

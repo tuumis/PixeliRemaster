@@ -884,7 +884,7 @@ function piirraSoitin() {
   soitinEdellinen = s.tila;
   const su = s.suora || {};
   if (su.tila === "avataan" && s.tila !== "ladataan") ilmoita(t("levy.avataan"));
-  else if (su.tila === "virhe" && suoraEdellinen !== "virhe") ilmoita(t("levy.katso_virhe"));
+  else if (su.tila === "virhe" && suoraEdellinen !== "virhe") ilmoita(t(String(su.virhe || "").startsWith("bluray_suojattu") ? "levy.bluray_suojattu" : "levy.katso_virhe"));
   suoraEdellinen = su.tila;
 }
 let suoraEdellinen = null;
@@ -925,7 +925,8 @@ function piirraLevy() {
 }
 async function katsoLevylta() {
   const L = levyTila, n = (L.nimikkeet || []).find(x => x.id === L.valittu); if (!n) return;
-  const r = await api("levy_katso", {indeksi: L.indeksi, kesto: n.kesto, bluray: !!L.bluray, levy: L.levy})
+  const asema = (L.asemat.find(a => a.indeksi === L.indeksi) || {}).polku || "";
+  const r = await api("levy_katso", {indeksi: L.indeksi, asema, kesto: n.kesto, bluray: !!L.bluray, levy: L.levy})
     .catch(e => ({virhe: String(e.message || e)}));
   $("#levy").close();
   if (r.virhe) ilmoita(t(r.virhe === "asema_kaytossa" ? "levy.asema_kaytossa" : "levy.katso_virhe"));

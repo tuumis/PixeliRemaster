@@ -1,3 +1,6 @@
+**Korjattu 1.9.3:** RTX-parannus toimi, mutta soitin ilmoitti virheellisesti, ettei näytönohjain tue sitä (ilmoitus luettiin ennen kuin kuvan koko oli päivittynyt). Katso levyltä toistaa nyt DVD:n soittimen omalla DVD-tuella, koska MakeMKV 1.18 on poistanut suoratoiston komentoriviltä; Blu-ray toistuu suoraan vain suojaamattomana.
+**Fixed in 1.9.3:** RTX enhancement worked, but the player wrongly said the graphics card doesn't support it (the status was read before the picture size had updated). Watch from disc now plays DVDs with the player's own DVD support, because MakeMKV 1.18 has removed streaming from its command line; Blu-rays play directly only when unprotected.
+
 **Korjattu 1.9.2:** Katso levyltä ei käynnistynyt: MakeMKV:n suoratoisto käynnistetään nyt sen ohjeen mukaisella tavalla, ja ohjelma odottaa levyn lukemista pidempään. MakeMKV:n viestit tallentuvat lokiin (lokit\makemkv_suoratoisto.log).
 **Fixed in 1.9.2:** Watch from disc didn't start: MakeMKV streaming is now started as documented, and the program waits longer for the disc to be read. MakeMKV's messages are saved to a log (lokit\makemkv_suoratoisto.log).
 
