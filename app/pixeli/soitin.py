@@ -148,11 +148,16 @@ def lataa(edistys=None):
 
 # ------------------------------------------------------------------ komennot
 
-def _yhteiset(otsikko):
+def _yhteiset(otsikko, lokinimi="mpv"):
+    """Kaikille toistotavoille. Elokuvan 24/25/50 kuvaa sekunnissa ei jakaudu tasan näytön virkistystaajuuteen
+    (esim. 144 Hz), jolloin kuvat näkyvät epätasaisen pitkään ja liike nykii. display-resample tahdistaa
+    toiston näyttöön (ääni sovitetaan huomaamattomasti) ja oversample tasoittaa loput ilman keinotekoista
+    välikuvien laskentaa."""
     loki = m.DATA / "lokit"
     loki.mkdir(parents=True, exist_ok=True)
     return ["--force-window=yes", "--keep-open=yes", f"--title={otsikko}", "--slang=fi,fin,en,eng",
-            "--sub-auto=fuzzy", "--osd-duration=2500", f"--log-file={loki / 'mpv.log'}"]
+            "--sub-auto=fuzzy", "--osd-duration=2500", "--video-sync=display-resample", "--interpolation=yes",
+            "--tscale=oversample", f"--log-file={loki / (lokinimi + '.log')}"]
 
 
 def _lainaa(arvo):
@@ -326,12 +331,12 @@ def rtx_skripti(suodin, kieli="fi", kesto=0):
                        "varalla": _lua_jono(varalla), "kesto": f"{float(kesto or 0):.1f}"}
 
 
-def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=(), levyn_kesto=0):
+def komento_reaaliaika(alkuperainen, an, kohde_korkeus, nimi, kieli="fi", lisat=(), levyn_kesto=0, lokinimi="mpv"):
     suodin = rtx_suodin(an, kohde_korkeus)
     skripti = kansio() / "pixeli_rtx.lua"
     skripti.parent.mkdir(parents=True, exist_ok=True)
     skripti.write_text(rtx_skripti(suodin, kieli, levyn_kesto), encoding="utf-8")
-    return [mpv_exe(), *_yhteiset(f"{nimi} – reaaliaikainen parannus"), "--hwdec=d3d11va", "--gpu-api=d3d11",
+    return [mpv_exe(), *_yhteiset(f"{nimi} – reaaliaikainen parannus", lokinimi), "--hwdec=d3d11va", "--gpu-api=d3d11",
             "--vo=gpu-next", f"--script={skripti}", *lisat, "--", str(alkuperainen)]
 
 
@@ -358,7 +363,8 @@ def katso_levylta(asema, kesto, bluray, kohde_korkeus, nimi, kieli="fi"):
             else:
                 an, url, lisat = {"korkeus": 576, "lomitus": "lomitettu"}, "dvd://", [f"--dvd-device={laite}"]
             cmd = komento_reaaliaika(url, an, kohde_korkeus, nimi, kieli,
-                                     lisat + ["--cache=yes", "--demuxer-readahead-secs=20"], levyn_kesto=kesto)
+                                     lisat + ["--cache=yes", "--cache-secs=90", "--demuxer-readahead-secs=90",
+                                              "--demuxer-max-bytes=600MiB"], levyn_kesto=kesto, lokinimi="mpv_levy")
             m.loki(f"Katsotaan levyltä: {url} {laite} (kesto {kesto} s)")
             SUORA["tila"] = "toistetaan"
             alku = time.time()

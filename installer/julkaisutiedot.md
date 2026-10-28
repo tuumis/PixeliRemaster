@@ -1,3 +1,6 @@
+**Korjattu 1.9.4:** tasaisempi toisto: soitin tahdistaa elokuvan näytön virkistystaajuuteen (esim. 144 Hz), joten liike ei nyi. Levyltä katsottaessa soitin lukee levyä pidemmälle eteenpäin.
+**Fixed in 1.9.4:** smoother playback: the player syncs the movie to the display refresh rate (e.g. 144 Hz), so motion no longer judders. When watching from a disc, the player reads further ahead.
+
 **Korjattu 1.9.3:** RTX-parannus toimi, mutta soitin ilmoitti virheellisesti, ettei näytönohjain tue sitä (ilmoitus luettiin ennen kuin kuvan koko oli päivittynyt). Katso levyltä toistaa nyt DVD:n soittimen omalla DVD-tuella, koska MakeMKV 1.18 on poistanut suoratoiston komentoriviltä; Blu-ray toistuu suoraan vain suojaamattomana.
 **Fixed in 1.9.3:** RTX enhancement worked, but the player wrongly said the graphics card doesn't support it (the status was read before the picture size had updated). Watch from disc now plays DVDs with the player's own DVD support, because MakeMKV 1.18 has removed streaming from its command line; Blu-rays play directly only when unprotected.
 
