@@ -1,6 +1,6 @@
 /* PixeliRemaster
    Neutraali tumma harmaa: värisävytön ympäristö ei vääristä arviota kuvan väreistä.
-   Tunnusväri: videokalibroinnin syaani; kalibrointipalkit vain ikkunan yläreunassa ja vertailun jakoviivassa. */
+   Tunnusväri: videokalibroinnin syaani; kalibrointivärit vain vertailun jakoviivassa. */
 @font-face{font-family:"Barlow";src:url(fontit/Barlow-Regular.ttf);font-weight:400;font-display:block}
 @font-face{font-family:"Barlow";src:url(fontit/Barlow-Medium.ttf);font-weight:500;font-display:block}
 @font-face{font-family:"Barlow";src:url(fontit/Barlow-SemiBold.ttf);font-weight:600;font-display:block}
@@ -30,13 +30,6 @@ button,input,select{font:inherit;color:inherit}
 [hidden]{display:none!important}
 .num{font-variant-numeric:tabular-nums}
 
-/* kalibrointipalkit */
-.palkit{display:flex;height:3px;flex:none}
-.palkit i{flex:1}
-.palkit i:nth-child(1){background:var(--p1)}.palkit i:nth-child(2){background:var(--p2)}
-.palkit i:nth-child(3){background:var(--p3)}.palkit i:nth-child(4){background:var(--p4)}
-.palkit i:nth-child(5){background:var(--p5)}.palkit i:nth-child(6){background:var(--p6)}
-.palkit i:nth-child(7){background:var(--p7)}
 
 .ylapalkki{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px 0 18px;
   border-bottom:1px solid var(--viiva);flex:none}
@@ -346,3 +339,6 @@ button,input,select{font:inherit;color:inherit}
 .tyokalut-sisalto .tyokalut-rivi{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .tyokalut-sisalto .edistys{flex:1;min-width:120px;margin:0}
 .tyokalut-sisalto .virhe{color:#F0A29D}
+
+.levy-kansio{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.huomio-levy{background:var(--paneeli);border-left:3px solid var(--keltainen);padding:8px 10px;border-radius:var(--r);font-size:13.5px}

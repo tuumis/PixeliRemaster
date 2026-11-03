@@ -51,6 +51,9 @@ for nimi, cmd in (("toista", soitin.komento_toista(remaster, "testi")),
         assert "lua error" not in loki.lower() and "RTX-tila:" in loki, loki
     else:
         assert p.returncode == 0, loki
+        assert "lua error" not in loki.lower(), loki
+        lokitiedosto = (m.DATA / "lokit" / "mpv.log").read_text(encoding="utf-8", errors="replace")
+        assert "tahti: " in lokitiedosto, lokitiedosto[-1500:]          # sulavuusloki kirjoitettu
 # katselu käsittelyn aikana: osat + alkuperäinen EDL-kokonaisuutena, tilaskripti
 import json  # noqa: E402
 wd = data / "kesken"

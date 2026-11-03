@@ -69,7 +69,7 @@ class Sovellus:
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
                 "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "soitin": soitin.tila(), "tyokalut": dict(tyokalut.TILA),
-                "makemkv": bool(levy.makemkvcon()), "aika": time.time()}
+                "makemkv": bool(levy.makemkvcon()), "aika_korjaus": m.aika_korjaus(), "aika": time.time()}
 
     # ------------------------------------------------------------ API
     def api(self, polku, d):
@@ -156,7 +156,7 @@ class Sovellus:
                 asennus.avaa_kansio(kohde)
             return {}
         if polku == "levy_asemat":
-            return levy.kaikki_asemat()
+            return levy.kaikki_asemat() | {"kansio": j.levykansio_tiedot()}
         if polku == "levy_nimikkeet":
             return levy.nimikkeet_asemalta(d.get("asema") or "", d.get("laji"))
         if polku == "levy_katso":
@@ -173,7 +173,8 @@ class Sovellus:
                 raise RuntimeError("asema_kaytossa")
             return j.lisaa_levylta(d.get("indeksi"), int(d["nimike"]), d.get("levy") or "", d.get("kesto") or 0,
                                    bool(d.get("kasittele", True)), bool(d.get("sailyta", True)),
-                                   asema=d.get("asema") or "", tapa=d.get("tapa") or "makemkv", koko=d.get("koko") or 0)
+                                   asema=d.get("asema") or "", tapa=d.get("tapa") or "makemkv", koko=d.get("koko") or 0,
+                                   kansio=d.get("kansio") or None)
         if polku == "tyokalut":
             return tyokalut.tiedot()
         if polku == "tyokalut_paivita":

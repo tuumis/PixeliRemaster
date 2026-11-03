@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.11.0"
+VERSIO = "1.12.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -1430,6 +1430,33 @@ def arvioi_nopeus(an, geo, n, kohina_kaytossa=False):
     return nop
 
 
+AIKA_ARVIO = "aika_arvio.json"
+LOPPU_OLETUS_S_MIN = 1.0      # yhdistäminen ja tekstitysten viimeistely, s / videon minuutti (ennen mittausta)
+
+
+def aika_korjaus():
+    """Toteutuneista käsittelyistä opittu korjaus aika-arvioon: {"suhde": {asetus: toteutunut/arvioitu
+    nopeus}, "loppu_s_min": viimeistelyn kesto sekunteina videon minuuttia kohden}."""
+    d = lue_json(DATA / AIKA_ARVIO, {}) or {}
+    return {"suhde": d.get("suhde") or {}, "loppu_s_min": d.get("loppu_s_min") or LOPPU_OLETUS_S_MIN}
+
+
+def kalibroi_aika(n, kuvia, kuvat_s, teho, ennuste, loppu_s, kesto_s):
+    """Päivittää korjauksen yhden valmistuneen käsittelyn perusteella (liukuva keskiarvo)."""
+    d = lue_json(DATA / AIKA_ARVIO, {}) or {}
+    suhde = d.setdefault("suhde", {})
+    if kuvia >= 1500 and kuvat_s > 30 and ennuste and teho:
+        r = min(5.0, max(0.2, kuvia / kuvat_s / teho / float(ennuste)))
+        vanha = suhde.get(str(n))
+        suhde[str(n)] = round(r if vanha is None else 0.4 * vanha + 0.6 * r, 3)
+    if loppu_s is not None and kesto_s and kesto_s > 120:
+        per = min(60.0, max(0.0, loppu_s / (kesto_s / 60)))
+        vanha = d.get("loppu_s_min")
+        d["loppu_s_min"] = round(per if vanha is None else 0.4 * vanha + 0.6 * per, 2)
+    kirjoita_json(DATA / AIKA_ARVIO, d)
+    return d
+
+
 KASITTELY_VERSIO = 2        # vaihdetaan vain, jos osien laskenta muuttuu (muuten keskeneräinen jatkuu päivityksen yli)
 
 
@@ -1522,7 +1549,9 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
         except OSError:
             pass
     maarat = meta["maarat"]
-    tila = {"t0": time.time(), "viim": 0.0, "historia": [(time.time(), sum(maarat.values()))]}
+    tila = {"t0": time.time(), "viim": 0.0, "historia": [(time.time(), sum(maarat.values()))],
+            "teho": [0.0, 0], "alku_kuvia": sum(maarat.values())}
+    loppu_arvio = aika_korjaus()["loppu_s_min"] * float(an.get("kesto") or 0) / 60
     ocr = _OcrTyo(src, an, valinta, wd, peruuta)       # tekstitysten tunnistus prosessorilla rinnalla
 
     with L.lukko:
@@ -1547,8 +1576,12 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
                     while len(h) > 2 and nyt - h[1][0] >= 60:
                         h.pop(0)
                     nop = (tehty - h[0][1]) / max(1e-6, nyt - h[0][0])
+                    tila["teho"][0] += teho_osuus()
+                    tila["teho"][1] += 1
+                    # ensimmäiset sekunnit (mallien lataus) eivät kerro nopeudesta: arvio vasta 20 s jälkeen
+                    luotettava = nop > 0 and nyt - h[0][0] >= 20
                     edistys({"tehty": tehty, "kaikki": arvio, "nopeus": round(nop, 2),
-                             "jaljella_s": (arvio - tehty) / nop if nop > 0 else None})
+                             "jaljella_s": (arvio - tehty) / nop + loppu_arvio if luotettava else None})
 
                 tmp = od / f"osa_{i:04d}.tmp.mkv"
                 c = aja_osa(src, an, geo, ketju, L.ops, tmp, i * N, N, "hevc", wd / "lokit", era=L.era,
@@ -1567,8 +1600,10 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
                 break
             i += 1
         del ketju
+    t_kuvat = time.time() - tila["t0"]
+    t_loppu0 = time.time()
     if edistys:
-        edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": 0, "yhdistetaan": True})
+        edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": loppu_arvio, "yhdistetaan": True})
     while ocr.kaynnissa():
         if peruuta is not None and peruuta.is_set():
             raise Peruutettu()
@@ -1597,6 +1632,9 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
         tulos["ocr_virhe"] = ocr.virhe
     tulos["ulos"] = str(ulos)
     tulos["aika_s"] = round(time.time() - tila["t0"])
+    tulos["mittaus_aika"] = {"kuvia": sum(maarat.values()) - tila["alku_kuvia"], "kuvat_s": round(t_kuvat, 1),
+                             "teho": round(tila["teho"][0] / tila["teho"][1], 3) if tila["teho"][1] else teho_osuus(),
+                             "loppu_s": round(time.time() - t_loppu0, 1)}
     return tulos
 
 

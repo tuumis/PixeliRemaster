@@ -225,6 +225,22 @@ _nr = ["[dvdnav] switched to VTS: 1 (old=0) domain=VTS",
 assert [_nl.rivi(x) for x in _nr] == [False, False, False, False, True] and _nl.syy.startswith("solu"), _nl.syy
 _nl = _lv.NimikkeenLoppu(0)
 assert not _nl.rivi(_nr[1]) and _nl.rivi("[dvdnav] new title 2") and _nl.syy == "nimike 2"
+# tallennuskansio ei käytettävissä (esim. ulkoinen asema irti) -> oletuskansio
+from pixeli import tyojono as _tj  # noqa: E402
+with _tf.TemporaryDirectory() as _d:
+    (Path(_d) / "tiedosto").write_bytes(b"x")
+    assert not _tj.Jono.kansio_saatavilla(str(Path(_d) / "tiedosto" / "ali"))
+    assert _tj.Jono.kansio_saatavilla(str(Path(_d) / "uusi"))
+    if os.name == "nt":
+        import string as _sg  # noqa: E402
+        _vapaa = next(k for k in reversed(_sg.ascii_uppercase) if not Path(f"{k}:\\").exists())
+        assert not _tj.Jono.kansio_saatavilla(f"{_vapaa}:\\Elokuvat")
+# aika-arvion korjaus toteutuneesta käsittelystä
+_ka = m.kalibroi_aika(2, 6000, 300, 0.65, 40, 120, 3600)
+assert abs(_ka["suhde"]["2"] - 0.769) < 0.01 and abs(_ka["loppu_s_min"] - 2.0) < 0.01, _ka
+assert m.aika_korjaus()["suhde"]["2"] == _ka["suhde"]["2"]
+(m.DATA / m.AIKA_ARVIO).unlink()
+assert m.aika_korjaus()["loppu_s_min"] == m.LOPPU_OLETUS_S_MIN
 print("levy ja soitin OK")
 
 ymp = asennus.Ymparisto()

@@ -249,8 +249,11 @@ function arvioAika(x, n) {
   const kuvia = an.kesto * murto(an.R);
   const nop = x.koe && x.koe.nopeus && x.koe.nopeus[String(n)];
   const osuus = TEHO_OSUUS[(TILA.jono && TILA.jono.asetukset && TILA.jono.asetukset.teho) || "taysi"] || 1;
-  if (nop) return kuvia / (nop * 1.15) / osuus;         // erissä hieman nopeampi kuin yksittäin mitattuna
-  if (n === nykyinenAsetus(x) && x.arvio_nopeus) return kuvia / x.arvio_nopeus / osuus;
+  // toteutuneista käsittelyistä opittu korjaus (sama kuin tyojono.arvioitu_aika) + yhdistäminen lopussa
+  const k = TILA.aika_korjaus || {}, suhde = Number((k.suhde || {})[String(n)]) || 1;
+  const loppu = (Number(k.loppu_s_min) || 1) * an.kesto / 60;
+  if (nop) return kuvia / (nop * 1.15 * suhde) / osuus + loppu;   // erissä hieman nopeampi kuin yksittäin
+  if (n === nykyinenAsetus(x) && x.arvio_nopeus) return kuvia / (x.arvio_nopeus * suhde) / osuus + loppu;
   return null;
 }
 
@@ -262,7 +265,8 @@ function tyoAllekirjoitus(x) {
     (x.valinta || {}).naarmut, (x.valinta || {}).vari, !!x.polku, (x.valinta || {}).puhe, (x.valinta || {}).ocr,
     x.tulos && x.tulos.ulos, TILA.ymparisto.valmis, TILA.ymparisto.kaynnistyy, x.liike && x.liike.tila, x.koe && x.koe.aika,
     x.koe && x.koe.versio, x.koe && !!x.koe.siirretaan, (TILA.jono.asetukset || {}).teho,
-    TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length]);
+    TILA.jono.tyot.filter(y => y.laji === x.laji && ["odottaa", "virhe", "keskeytetty"].includes(y.tila)).length,
+    (x.levy || {}).kansio_vaihtui, JSON.stringify(TILA.aika_korjaus || null)]);
 }
 
 function piirraTyo() {
@@ -413,6 +417,7 @@ function tyoHtml(x) {
   if (x.tila === "ripataan") {
     return `${otsikko}<div class="levy-kortti"><h3>${t("levy.kopioidaan", {n: esc((x.levy || {}).nimi || x.nimi)})}</h3>
       <p>${t(((x.levy || {}).tapa === "oma" ? "levy.kopioidaan_oma" : "levy.kopioidaan") + ((x.levy || {}).kasittele ? "_selite_auto" : "_selite"))}</p>
+      ${(x.levy || {}).kansio_vaihtui ? `<p class="huomio-levy">${t("levy.kansio_vaihtui", {k: esc(x.levy.kansio_vaihtui), u: esc(x.levy.kansio || "")})}</p>` : ""}
       <div class="edistys"><i id="levy-palkki" style="width:${(100 * ((x.levy || {}).edistys || 0)).toFixed(1)}%"></i></div></div>`;
   }
   if (!x.analyysi) {
@@ -916,11 +921,19 @@ function piirraLevy() {
     c.innerHTML = `${valitsin}<p>${t("levy.levy", {n: esc(L.levy || "")})}</p><div class="nimikkeet">${rivit}</div>
       <div class="valinnat-levy"><label><input type="checkbox" id="levy-kasittele" ${L.kasittele ? "checked" : ""}>${t("levy.kasittele")}</label>
       <label><input type="checkbox" id="levy-sailyta" ${L.sailyta ? "checked" : ""}>${t("levy.sailyta")}</label></div>
-      <p><small>${t("levy.kansio", {k: esc(L.kansio || "")})}</small></p>
+      ${L.kansioPuuttuu ? `<p class="huomio-levy">${t("levy.kansio_puuttuu", {k: esc(L.kansioPuuttuu)})}</p>` : ""}
+      <p class="levy-kansio"><small>${t("levy.kansio", {k: esc(L.kansio || "")})}</small>
+        <button type="button" class="painike pieni toissijainen" id="levy-vaihda-kansio">${t("levy.vaihda_kansio")}</button></p>
       <p><small>${t(L.tapa === "makemkv" ? "levy.tapa_makemkv" : "levy.tapa_oma")}</small></p>`;
     $$('input[name="levy-nimike"]').forEach(r => r.addEventListener("change", () => { L.valittu = Number(r.value); }));
     $("#levy-kasittele").addEventListener("change", e => { L.kasittele = e.target.checked; });
     $("#levy-sailyta").addEventListener("change", e => { L.sailyta = e.target.checked; });
+    $("#levy-vaihda-kansio").addEventListener("click", async () => {
+      const r = await api("valitse", {laji: "kansio"}).catch(() => ({}));
+      if (levyTila !== L || !r.kansio) return;
+      Object.assign(L, {kansio: r.kansio, omaKansio: r.kansio, kansioPuuttuu: null});
+      piirraLevy();
+    });
     aloita.disabled = L.valittu == null;
     $("#levy-katso").disabled = L.valittu == null;
   }
@@ -958,6 +971,10 @@ async function avaaLevy() {
   const r = await api("levy_asemat").catch(e => ({virhe: String(e.message || e)}));
   if (levyTila !== L) return;
   if (r.virhe) { L.vaihe = "virhe"; L.viesti = r.virhe; piirraLevy(); return; }
+  if (r.kansio) {
+    L.kansio = r.kansio.kansio;
+    if (!r.kansio.saatavilla) { L.kansioPuuttuu = r.kansio.asetettu; L.omaKansio = r.kansio.kansio; }
+  }
   L.asemat = (r.asemat || []).filter(a => a.levy_sisalla);
   if (!L.asemat.length) { L.vaihe = "ei_levya"; piirraLevy(); return; }
   const video = L.asemat.find(a => a.laji === "dvd" || a.laji === "bluray") || L.asemat[0];
@@ -966,7 +983,7 @@ async function avaaLevy() {
 async function aloitaLevy() {
   const L = levyTila, n = (L.nimikkeet || []).find(x => x.id === L.valittu); if (!n) return;
   const r = await api("levy_lisaa", {asema: L.asema, tapa: L.tapa, indeksi: L.indeksi, nimike: n.id, levy: L.levy,
-    kesto: n.kesto, koko: n.koko || 0, kasittele: L.kasittele, sailyta: L.sailyta}).catch(() => null);
+    kesto: n.kesto, koko: n.koko || 0, kasittele: L.kasittele, sailyta: L.sailyta, kansio: L.omaKansio || null}).catch(() => null);
   $("#levy").close();
   if (r && r.id) { valittu = r.id; edellinenTyoAllekirjoitus = ""; ilmoita(t("levy.aloitettu")); }
   hae_kerran();

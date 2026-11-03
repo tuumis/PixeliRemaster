@@ -148,6 +148,55 @@ def lataa(edistys=None):
 
 # ------------------------------------------------------------------ komennot
 
+_TAHTI_LUA = r"""-- PixeliRemaster: toiston sulavuuden seuranta lokiin (pudotetut ja myöhästyneet kuvat, näytön taajuus)
+local mp = require "mp"
+local function kirjaa()
+    local function n(p) return mp.get_property_number(p) or -1 end
+    mp.msg.info(string.format("tahti: aika=%.0f fps=%.3f naytto=%.3f arvio=%.3f jitter=%.4f pudotettu=%d vo_pudotettu=%d "
+        .. "myohassa=%d vaarin_ajoitettu=%d hwdec=%s vo=%s", n("time-pos"), n("container-fps"), n("display-fps"),
+        n("estimated-display-fps"), n("vsync-jitter"), n("frame-drop-count"), n("vo-drop-frame-count"),
+        n("vo-delayed-frame-count"), n("mistimed-frame-count"), mp.get_property("hwdec-current") or "-",
+        mp.get_property("current-vo") or "-"))
+end
+mp.add_periodic_timer(30, kirjaa)
+mp.register_event("shutdown", kirjaa)
+"""
+
+
+def _tahti_skripti():
+    p = kansio() / "pixeli_tahti.lua"
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if not p.exists() or p.read_text(encoding="utf-8") != _TAHTI_LUA:
+            p.write_text(_TAHTI_LUA, encoding="utf-8")
+        return [f"--script={p}"]
+    except OSError:
+        return []
+
+
+def aseta_tehokas_gpu(exe):
+    """Windows: soitin tehokkaalle näytönohjaimelle (kannettavissa muuten usein integroitu näytönohjain,
+    joka ei ehdi laskea parannusta joka kuvaan -> nykivä kuva). Käyttäjän oma valinta säilyy."""
+    if os.name != "nt" or not exe:
+        return False
+    try:
+        import winreg
+        avain = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\DirectX\UserGpuPreferences")
+        try:
+            try:
+                winreg.QueryValueEx(avain, str(exe))
+                return False                         # käyttäjä tai aiempi versio on jo valinnut
+            except FileNotFoundError:
+                winreg.SetValueEx(avain, str(exe), 0, winreg.REG_SZ, "GpuPreference=2;")
+                m.loki(f"Soitin asetettu käyttämään tehokasta näytönohjainta: {exe}")
+                return True
+        finally:
+            winreg.CloseKey(avain)
+    except OSError as e:
+        m.loki(f"Näytönohjainvalintaa ei voitu asettaa: {e}")
+        return False
+
+
 def _yhteiset(otsikko, lokinimi="mpv"):
     """Kaikille toistotavoille. Elokuvan 24/25/50 kuvaa sekunnissa ei jakaudu tasan näytön virkistystaajuuteen
     (esim. 144 Hz), jolloin kuvat näkyvät epätasaisen pitkään ja liike nykii. display-resample tahdistaa
@@ -157,7 +206,7 @@ def _yhteiset(otsikko, lokinimi="mpv"):
     loki.mkdir(parents=True, exist_ok=True)
     return ["--force-window=yes", "--keep-open=yes", f"--title={otsikko}", "--slang=fi,fin,en,eng",
             "--sub-auto=fuzzy", "--osd-duration=2500", "--video-sync=display-resample", "--interpolation=yes",
-            "--tscale=oversample", f"--log-file={loki / (lokinimi + '.log')}"]
+            "--tscale=oversample", f"--log-file={loki / (lokinimi + '.log')}", *_tahti_skripti()]
 
 
 def _lainaa(arvo):
@@ -345,9 +394,13 @@ VARJOSTIMET = {
 }
 OMA_TEKSTIT = {
     "fi": {"paalla": "Parannus PÄÄLLÄ ({malli})", "pois": "Parannus POIS (tavallinen skaalaus)", "ohje": "N vaihtaa",
-           "elokuva": "FSRCNNX", "piirretty": "Anime4K"},
+           "elokuva": "FSRCNNX", "piirretty": "Anime4K",
+           "kevennetty": "Näytönohjain ei ehtinyt laskea parannusta joka kuvaan, joten se kytkettiin pois sulavan "
+                         "toiston vuoksi (N palauttaa)"},
     "en": {"paalla": "Enhancement ON ({malli})", "pois": "Enhancement OFF (regular scaling)", "ohje": "N toggles",
-           "elokuva": "FSRCNNX", "piirretty": "Anime4K"},
+           "elokuva": "FSRCNNX", "piirretty": "Anime4K",
+           "kevennetty": "The graphics card couldn't keep up with the enhancement, so it was turned off for smooth "
+                         "playback (N turns it back on)"},
 }
 
 _OMA_LUA = r"""-- PixeliRemaster: soittimen oma suurennus (varjostimet) päälle/pois
@@ -368,6 +421,24 @@ mp.register_event("file-loaded", function()
         varjostimet = mp.get_property_native("glsl-shaders") or {}
         mp.add_timeout(0.8, function() kerro(#varjostimet > 0, 5) end)
     end
+end)
+-- sulavuusvahti: jos kuvia putoaa toistuvasti (näytönohjain ei ehdi), parannus pois ja ilmoitus
+local edellinen, ylitykset, kevennetty = nil, 0, false
+mp.add_periodic_timer(5, function()
+    if mp.get_property_native("pause") or mp.get_property_native("seeking")
+        or mp.get_property_native("paused-for-cache") then edellinen = nil; return end
+    local d = (mp.get_property_number("frame-drop-count") or 0) + (mp.get_property_number("vo-drop-frame-count") or 0)
+    if edellinen then
+        local ero = d - edellinen
+        if ero >= 6 then ylitykset = ylitykset + 1 else ylitykset = 0 end
+        if ylitykset >= 2 and not kevennetty and #(mp.get_property_native("glsl-shaders") or {}) > 0 then
+            kevennetty = true
+            mp.set_property_native("glsl-shaders", {})
+            mp.msg.warn("Kuvia putoaa (" .. ero .. " / 5 s): oma parannus pois sulavan toiston vuoksi")
+            mp.osd_message(T.kevennetty, 7)
+        end
+    end
+    edellinen = d
 end)
 mp.add_key_binding("n", "pixeli-oma", function()
     local nyt = mp.get_property_native("glsl-shaders") or {}
@@ -604,6 +675,7 @@ def komento_kesken(tila_polku, nimi, kieli="fi"):
 
 
 def kaynnista(cmd):
+    aseta_tehokas_gpu(cmd[0])
     m.loki("mpv: " + " ".join(str(c) for c in cmd[1:4]) + " …")
     return subprocess.Popen([str(c) for c in cmd], creationflags=0x00000200 if os.name == "nt" else 0)
 

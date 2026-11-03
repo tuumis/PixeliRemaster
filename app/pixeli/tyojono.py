@@ -191,13 +191,41 @@ class Jono:
         self._tallenna()
         return {"lisatyt": lisatyt, "ohitetut": ohitetut}
 
+    @staticmethod
+    def oletus_levykansio():
+        return Path.home() / "Videos" / "PixeliRemaster"
+
+    @staticmethod
+    def kansio_saatavilla(k):
+        """Onko kansio käytettävissä (esim. ulkoinen asema kiinni) ja voiko sinne kirjoittaa."""
+        if not k:
+            return False
+        p = Path(k)
+        try:
+            if p.anchor and not Path(p.anchor).exists():
+                return False
+            p.mkdir(parents=True, exist_ok=True)
+            testi = p / ".pixeli_kirjoitustesti"
+            testi.write_bytes(b"")
+            testi.unlink()
+            return True
+        except OSError:
+            return False
+
     def levykansio(self):
         """Levyltä kopioidut elokuvat: valittu tallennuskansio tai Videot\\PixeliRemaster."""
         k = self.asetukset.get("ulos_kansio")
-        return Path(k) if k else Path.home() / "Videos" / "PixeliRemaster"
+        return Path(k) if k else self.oletus_levykansio()
+
+    def levykansio_tiedot(self):
+        """Levyltä-ikkunalle: asetuksissa valittu kansio, onko se nyt käytettävissä ja mihin tallennetaan."""
+        k = self.asetukset.get("ulos_kansio")
+        ok = self.kansio_saatavilla(k) if k else True
+        return {"asetettu": k, "saatavilla": ok, "oletus": str(self.oletus_levykansio()),
+                "kansio": str(self.levykansio() if ok else self.oletus_levykansio())}
 
     def lisaa_levylta(self, indeksi, nimike, levyn_nimi, kesto=0, kasittele=True, sailyta=True, asema="",
-                      tapa="makemkv", koko=0):
+                      tapa="makemkv", koko=0, kansio=None):
         """Levyn nimike kopioidaan jonoon. tapa "oma" = DVD soittimen kirjastoilla, "makemkv" = MakeMKV."""
         from . import levy
         nimi = levy.turvallinen_nimi(levyn_nimi)
@@ -207,6 +235,7 @@ class Jono:
                  "levy": {"indeksi": None if indeksi is None else int(indeksi), "nimike": int(nimike), "nimi": nimi,
                           "kesto": kesto, "asema": str(asema or ""), "tapa": "oma" if tapa == "oma" else "makemkv",
                           "koko": int(koko or 0), "kasittele": bool(kasittele), "sailyta": bool(sailyta),
+                          "kansio": str(kansio) if kansio else None,
                           "edistys": 0.0}}
             self.tyot.append(t)
         self._levy_q.put(t["id"])
@@ -227,7 +256,15 @@ class Jono:
                     lv = t["levy"]
                     self._ripattava = tid
                 self._peruuta_levy.clear()
-                kansio = self.levykansio()
+                kansio = Path(lv.get("kansio") or self.levykansio())
+                if not self.kansio_saatavilla(kansio):
+                    # esim. ulkoinen asema irrotettu: kopio oletuskansioon, ettei levyn kopiointi epäonnistu
+                    m.loki(f"Tallennuskansio {kansio} ei ole käytettävissä, kopioidaan kansioon "
+                           f"{self.oletus_levykansio()}")
+                    kansio = self.oletus_levykansio()
+                    with self.lukko:
+                        lv["kansio_vaihtui"] = str(lv.get("kansio") or self.levykansio())
+                        lv["kansio"] = str(kansio)
                 tmp = kansio / f".pixeli_rippaus_{tid}"
 
                 def ed(f, lv=lv):
@@ -510,14 +547,37 @@ class Jono:
                 elif t.get("laji") == "kuva":
                     n = str((t.get("valinta") or {}).get("asetus") or (t.get("analyysi") or {}).get("suositus"))
                     jaljella += ((t.get("koe") or {}).get("aika") or {}).get(n) or 5.0
-                elif t.get("arvio_nopeus") and t.get("analyysi"):
-                    an = t["analyysi"]
-                    from fractions import Fraction
-                    jaljella += an["kesto"] * float(Fraction(an["R"])) / t["arvio_nopeus"] / m.teho_osuus()
+                elif t.get("analyysi"):
+                    jaljella += self.arvioitu_aika(t) or 0.0
             return {"tyot": tyot, "asetukset": self.asetukset, "kohde": list(self.kohde()),
                     "sammuta_valmiina": self.sammuta_valmiina, "sammutus_ajastettu": self.sammutus_ajastettu,
                     "jono_jaljella_s": jaljella if jonossa else None, "kasiteltava": self._kasiteltava,
                     "kasiteltava_kuva": self._kasiteltava_kuva}
+
+    # ------------------------------------------------------------ aika-arvio
+    @staticmethod
+    def ennuste_nopeus(t, n):
+        """Esikatselussa mitattu nopeus (kuvaa/s täydellä teholla) tai itsetestin arvio; sama kuin näkymässä."""
+        nop = ((t.get("koe") or {}).get("nopeus") or {}).get(str(n))
+        if nop:
+            return float(nop) * 1.15            # erissä hieman nopeampi kuin yksittäin mitattuna
+        an = t.get("analyysi") or {}
+        if t.get("arvio_nopeus") and int(n) == int((t.get("valinta") or {}).get("asetus") or an.get("suositus") or 2):
+            return float(t["arvio_nopeus"])
+        return None
+
+    def arvioitu_aika(self, t, n=None):
+        """Videon käsittelyn arvioitu kesto sekunteina toteutuneilla korjauksilla ja viimeistelyllä."""
+        from fractions import Fraction
+        an = t.get("analyysi") or {}
+        n = int(n or (t.get("valinta") or {}).get("asetus") or an.get("suositus") or 2)
+        nop = self.ennuste_nopeus(t, n)
+        if not nop or not an.get("kesto"):
+            return None
+        k = m.aika_korjaus()
+        suhde = float(k["suhde"].get(str(n)) or 1.0)
+        return (an["kesto"] * float(Fraction(an["R"])) / (nop * suhde * m.teho_osuus())
+                + k["loppu_s_min"] * an["kesto"] / 60)
 
     # ------------------------------------------------------------ säikeet
     def _analyysi_saie(self):
@@ -640,6 +700,14 @@ class Jono:
                     t["tulos"] = tulos
                     t["valmistui"] = time.time()
                 m.loki(f"Valmis: {tulos['ulos']}")
+                try:
+                    ma = tulos.get("mittaus_aika") or {}
+                    n = int(valinta.get("asetus") or an["suositus"])
+                    d = m.kalibroi_aika(n, ma.get("kuvia", 0), ma.get("kuvat_s", 0), ma.get("teho"),
+                                        self.ennuste_nopeus(t, n), ma.get("loppu_s"), an.get("kesto"))
+                    m.loki(f"Aika-arvion korjaus: {ma} -> {d}")
+                except Exception as e:  # noqa: BLE001
+                    m.loki(f"Aika-arvion korjausta ei päivitetty: {e}")
                 if t.get("levy") and not t["levy"].get("sailyta", True):
                     try:
                         polku.unlink()                  # levyltä kopioitu välitiedosto
