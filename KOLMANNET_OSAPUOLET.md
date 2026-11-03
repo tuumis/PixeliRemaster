@@ -52,4 +52,6 @@ Varjostimet ovat muuttamattomia. / The shaders are unmodified.
 | mpv (shinchiro/mpv-winbuild-cmake; sis. libdvdnav, libdvdread, libdvdcss, libbluray) | GPL-2.0+ / LGPL | ladataan ensimmäisellä toistolla / downloaded on first playback; https://mpv.io, https://github.com/shinchiro/mpv-winbuild-cmake |
 | pywinrt (winrt-runtime, winrt-Windows.*) | MIT | ladataan ensimmäisellä tekstitysten tunnistuksella / downloaded on first subtitle recognition; tekstintunnistus on Windowsin oma (Windows.Media.Ocr) |
 | MakeMKV | oma lisenssi / proprietary | ei mukana – Blu-ray-levyille käytetään käyttäjän itse asentamaa ohjelmaa / not included – the user's own installation is used for Blu-rays; https://www.makemkv.com |
+| yt-dlp | Unlicense | ladataan ensimmäisellä käytöllä (Linkistä) / downloaded on first use (From link); https://github.com/yt-dlp/yt-dlp |
+| Deno (yt-dlp:n JavaScript-ajoympäristö / JavaScript runtime for yt-dlp) | MIT | ladataan yt-dlp:n mukana / downloaded with yt-dlp; https://deno.com |
 | Barlow-kirjasin / typeface | SIL Open Font License 1.1 | `app/web/fontit/OFL.txt` |

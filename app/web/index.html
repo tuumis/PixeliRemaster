@@ -41,7 +41,8 @@
     <div class="jono-ala">
       <div class="lisaa-rivi"><button class="painike toissijainen" id="lisaa" data-t="jono.lisaa"></button>
         <button class="painike toissijainen" id="lisaa-kansio" data-t="jono.lisaa_kansio"></button>
-        <button class="painike toissijainen" id="lisaa-levy" data-t="jono.lisaa_levy"></button></div>
+        <button class="painike toissijainen" id="lisaa-levy" data-t="jono.lisaa_levy"></button>
+        <button class="painike toissijainen" id="lisaa-linkki" data-t="jono.lisaa_linkki"></button></div>
       <p class="vihje" id="pudota-vihje" data-t="jono.pudota_vihje"></p>
     </div>
   </aside>
@@ -109,6 +110,24 @@
       <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
       <button class="painike toissijainen" type="button" id="levy-katso" data-t="levy.katso" disabled></button>
       <button class="painike ensisijainen" type="button" id="levy-aloita" data-t="levy.aloita" disabled></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="linkki" class="dialogi">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 data-t="linkki.otsikko"></h2>
+    <p data-t="linkki.ohje"></p>
+    <div class="linkki-rivi">
+      <input type="url" id="linkki-osoite" autocomplete="off" spellcheck="false" data-t-placeholder="linkki.paikka">
+      <button class="painike toissijainen" type="button" id="linkki-hae" data-t="linkki.hae"></button>
+    </div>
+    <div id="linkki-sisalto" class="levy-sisalto"></div>
+    <p class="linkki-oikeudet"><small data-t="linkki.oikeudet"></small></p>
+    <div class="toiminnot">
+      <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
+      <button class="painike toissijainen" type="button" id="linkki-jonoon" data-t="linkki.jonoon" disabled></button>
+      <button class="painike ensisijainen" type="button" id="linkki-heti" data-t="linkki.heti" disabled></button>
     </div>
   </form>
 </dialog>

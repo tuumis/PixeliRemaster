@@ -15,6 +15,7 @@ import json
 import os
 import queue
 import subprocess
+import shutil
 import threading
 import time
 import traceback
@@ -52,14 +53,21 @@ class Jono:
         self._levy_q = queue.Queue()
         self._peruuta_levy = threading.Event()
         self._ripattava = None
+        self._lataus_q = queue.Queue()
+        self._peruuta_lataus = threading.Event()
+        self._ladattava = None
         self._lataa()
         for nimi, kohde in (("analyysi", self._analyysi_saie), ("gpu", self._gpu_saie), ("koe", self._koe_saie),
-                            ("levy", self._levy_saie)):
+                            ("levy", self._levy_saie), ("lataus", self._lataus_saie)):
             threading.Thread(target=kohde, name=nimi, daemon=True).start()
         for t in self.tyot:
             if t["tila"] == "ripataan":          # keskeytynyt rippaus aloitetaan alusta
                 t.setdefault("levy", {})["edistys"] = 0.0
                 self._levy_q.put(t["id"])
+                continue
+            if t["tila"] == "ladataan":          # keskeytynyt lataus jatkuu (yt-dlp jatkaa osittaisesta)
+                t.setdefault("lataus", {})["edistys"] = 0.0
+                self._lataus_q.put(t["id"])
                 continue
             if t["tila"] == "analysoidaan" or (t["tila"] not in ("valmis", "virhe") and not t.get("analyysi")):
                 t["tila"] = "analysoidaan"
@@ -313,6 +321,100 @@ class Jono:
                     self._ripattava = None
                 self._tallenna()
 
+    # ------------------------------------------------------------ lataus verkosta (YouTube ym.)
+    def lisaa_linkista(self, url, tiedot, heti=True, tekstit=True, kansio=None):
+        """Video linkistä jonoon. heti=True: remasterointi alkaa latauksen ja analyysin jälkeen suositellulla
+        asetuksella; muuten video jää odottamaan asetuksen valintaa. Tallennus asetusten kansioon."""
+        from . import levy
+        tiedot = tiedot or {}
+        nimi = levy.turvallinen_nimi(tiedot.get("nimi") or "Video", "Video")
+        with self.lukko:
+            t = {"id": _uusi_id(), "polku": "", "nimi": nimi + ".mkv", "lisatty": time.time(), "laji": "video",
+                 "tila": "ladataan", "valinta": {}, "koe": {"tila": "ei"}, "liike": {},
+                 "lataus": {"url": str(url), "nimi": nimi, "kanava": tiedot.get("kanava") or "",
+                            "sivu": tiedot.get("sivu") or "", "kesto": float(tiedot.get("kesto") or 0),
+                            "korkeus": int(tiedot.get("korkeus") or 0), "osat": tiedot.get("osat") or [],
+                            "kasittele": bool(heti) and int(tiedot.get("korkeus") or 0) < 720,
+                            "tekstit": bool(tekstit), "kansio": str(kansio) if kansio else None, "edistys": 0.0}}
+            self.tyot.append(t)
+        self._lataus_q.put(t["id"])
+        self._tallenna()
+        return {"id": t["id"]}
+
+    def _latauskansio(self, t):
+        lt = t.get("lataus") or {}
+        return Path(lt.get("kansio") or self.levykansio()) / f".pixeli_lataus_{t['id']}"
+
+    def _poista_latauskansio(self, t):
+        shutil.rmtree(self._latauskansio(t), ignore_errors=True)
+
+    def _lataus_saie(self):
+        from . import lataus
+        while not self._lopeta:
+            tid = self._lataus_q.get()
+            if tid is None:
+                return
+            t = None
+            try:
+                with self.lukko:
+                    t = self._tyo(tid)
+                    if t["tila"] != "ladataan":
+                        continue
+                    lt = t["lataus"]
+                    self._ladattava = tid
+                self._peruuta_lataus.clear()
+                kansio = Path(lt.get("kansio") or self.levykansio())
+                if not self.kansio_saatavilla(kansio):
+                    m.loki(f"Tallennuskansio {kansio} ei ole käytettävissä, ladataan kansioon "
+                           f"{self.oletus_levykansio()}")
+                    with self.lukko:
+                        lt["kansio_vaihtui"] = str(kansio)
+                        lt["kansio"] = str(self.oletus_levykansio())
+                    kansio = self.oletus_levykansio()
+                with self.lukko:
+                    lt["kansio"] = str(kansio)
+                tmp = self._latauskansio(t)
+
+                def ed(f, lt=lt):
+                    with self.lukko:
+                        lt["edistys"] = round(min(1.0, max(0.0, f)), 4)
+                alku = time.time()
+                valmis = lataus.lataa(lt["url"], tmp, lt.get("osat"), lt.get("tekstit", True), ed,
+                                      self._peruuta_lataus)
+                kohde = kansio / valmis.name
+                n = 2
+                while kohde.exists():
+                    kohde = kansio / f"{valmis.stem} ({n}){valmis.suffix}"
+                    n += 1
+                valmis.replace(kohde)
+                shutil.rmtree(tmp, ignore_errors=True)
+                m.loki(f"Ladattu {lt['url']} -> {kohde} ({time.time() - alku:.0f} s)")
+                with self.lukko:
+                    t["polku"] = str(kohde)
+                    t["nimi"] = kohde.name
+                    t["tila"] = "analysoidaan"
+                    lt.pop("edistys", None)
+                self._analyysi_q.put(tid)
+            except KeyError:
+                pass
+            except m.Peruutettu:
+                with self.lukko:
+                    if t is not None and t in self.tyot and not self._lopeta:
+                        self.tyot.remove(t)
+                if t is not None and not self._lopeta:
+                    self._poista_latauskansio(t)              # suljettaessa osittainen lataus jatkuu myöhemmin
+            except Exception as e:  # noqa: BLE001
+                m.loki(f"Lataus epäonnistui: {traceback.format_exc()}")
+                with self.lukko:
+                    if t is not None:
+                        t["tila"] = "virhe"
+                        t["virhe"] = {"avain": "lataus_" + str(getattr(e, "avain", "lataus")),
+                                      "tieto": (getattr(e, "tieto", "") or str(e))[-500:]}
+            finally:
+                with self.lukko:
+                    self._ladattava = None
+                self._tallenna()
+
     def poista(self, tid):
         with self.lukko:
             t = self._tyo(tid)
@@ -322,6 +424,10 @@ class Jono:
                 self._peruuta_kuva.set()
             if self._ripattava == tid:
                 self._peruuta_levy.set()
+            if self._ladattava == tid:
+                self._peruuta_lataus.set()
+            elif t["tila"] == "ladataan":
+                self._poista_latauskansio(t)
             self.tyot.remove(t)
         self._tallenna()
 
@@ -519,6 +625,8 @@ class Jono:
         self._peruuta_kuva.set()
         self._herata.set()
         self._peruuta_levy.set()
+        self._peruuta_lataus.set()
+        self._lataus_q.put(None)
         self._koe_q.put(None)
         self._analyysi_q.put(None)
         self._levy_q.put(None)
@@ -608,8 +716,10 @@ class Jono:
                     self._paivita_geometria(t)
                     if t["tila"] == "analysoidaan":
                         t["tila"] = "hd" if an["tyyppi"] == "hd" else "odottaa"
-                        if t["tila"] == "odottaa" and (t.get("levy") or {}).pop("kasittele", False):
-                            t["tila"] = "jonossa"          # levyltä: käsittely alkaa suositellulla asetuksella
+                        auto = bool((t.get("levy") or {}).pop("kasittele", False)) | \
+                            bool((t.get("lataus") or {}).pop("kasittele", False))
+                        if t["tila"] == "odottaa" and auto:
+                            t["tila"] = "jonossa"          # levyltä / linkistä: käsittely alkaa suositellulla asetuksella
                             self._herata.set()
                     vanha = (t.get("koe") or {}).get("tunniste")
                     if vanha and vanha != self._koe_tunniste(t):
@@ -642,7 +752,7 @@ class Jono:
 
     def _kaikki_valmiit(self):
         with self.lukko:
-            return not any(t["tila"] in ("jonossa", "kasitellaan", "ripataan") for t in self.tyot)
+            return not any(t["tila"] in ("jonossa", "kasitellaan", "ripataan", "ladataan") for t in self.tyot)
 
     def _gpu_saie(self):
         while not self._lopeta:

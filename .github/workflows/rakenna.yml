@@ -124,6 +124,17 @@ jobs:
           ./build/python/python.exe installer/levytesti.py (Join-Path $env:RUNNER_TEMP "testilevy") (Join-Path $env:RUNNER_TEMP "levykopio")
           if ($LASTEXITCODE -ne 0) { throw "levytesti epäonnistui" }
 
+      - name: Lataus linkistä (yt-dlp ja Deno)
+        shell: pwsh
+        env:
+          PIXELI_GH_TOKEN: ${{ github.token }}
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "pixeli_lataus"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:PIXELI_DATA = $data
+          ./build/python/python.exe installer/lataustesti.py $data
+          if ($LASTEXITCODE -ne 0) { throw "lataustesti epäonnistui" }
+
       - name: Tekstitysten tunnistus (Windowsin OCR)
         shell: pwsh
         run: |

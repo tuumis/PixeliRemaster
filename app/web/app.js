@@ -47,6 +47,7 @@ function koko(tavut) {
 function kaannaStaattiset() {
   document.documentElement.lang = KIELI;
   $$("[data-t]").forEach(e => { e.textContent = t(e.dataset.t); });
+  $$("[data-t-placeholder]").forEach(e => { e.placeholder = t(e.dataset.tPlaceholder); });
 }
 
 /* ------------------------------------------------------------ palvelin */
@@ -198,6 +199,7 @@ function tilaTeksti(x) {
     return t("tila.kasitellaan", {p: e.kaikki ? `${luku(100 * e.tehty / e.kaikki)} %` : ""});
   }
   if (x.tila === "ripataan") return t("tila.ripataan", {p: `${luku(100 * ((x.levy || {}).edistys || 0))} %`});
+  if (x.tila === "ladataan") return t("tila.ladataan", {p: `${luku(100 * ((x.lataus || {}).edistys || 0))} %`});
   return t("tila." + x.tila);
 }
 function piirraJono() {
@@ -211,7 +213,8 @@ function piirraJono() {
       : tun ? media(x.id, `koe_${tun}/v1_k2.png`, tun) : "";
     const e = x.edistys || {};
     const pros = x.tila === "kasitellaan" && e.kaikki ? 100 * e.tehty / e.kaikki
-      : x.tila === "ripataan" ? 100 * ((x.levy || {}).edistys || 0) : null;
+      : x.tila === "ripataan" ? 100 * ((x.levy || {}).edistys || 0)
+      : x.tila === "ladataan" ? 100 * ((x.lataus || {}).edistys || 0) : null;
     return `<li class="kohta" data-id="${esc(x.id)}" aria-current="${x.id === valittu}" tabindex="0">
       <div class="pikku" style="${kuva ? `background-image:url('${kuva}')` : ""}">${kuva ? "" : esc((x.nimi.split(".").pop() || "").toUpperCase())}</div>
       <div><div class="nimi" title="${esc(x.nimi)}">${esc(x.nimi)}</div>
@@ -419,6 +422,14 @@ function tyoHtml(x) {
       <p>${t(((x.levy || {}).tapa === "oma" ? "levy.kopioidaan_oma" : "levy.kopioidaan") + ((x.levy || {}).kasittele ? "_selite_auto" : "_selite"))}</p>
       ${(x.levy || {}).kansio_vaihtui ? `<p class="huomio-levy">${t("levy.kansio_vaihtui", {k: esc(x.levy.kansio_vaihtui), u: esc(x.levy.kansio || "")})}</p>` : ""}
       <div class="edistys"><i id="levy-palkki" style="width:${(100 * ((x.levy || {}).edistys || 0)).toFixed(1)}%"></i></div></div>`;
+  }
+  if (x.tila === "ladataan") {
+    const lt = x.lataus || {};
+    return `${otsikko}<div class="levy-kortti"><h3>${t("linkki.ladataan", {n: esc(lt.nimi || x.nimi)})}</h3>
+      <p>${t(lt.kasittele ? "linkki.ladataan_auto" : "linkki.ladataan_jono")}</p>
+      ${lt.kansio_vaihtui ? `<p class="huomio-levy">${t("levy.kansio_vaihtui", {k: esc(lt.kansio_vaihtui), u: esc(lt.kansio || "")})}</p>` : ""}
+      <div class="edistys"><i id="lataus-palkki" style="width:${(100 * (lt.edistys || 0)).toFixed(1)}%"></i></div>
+      <p><small>${t("levy.kansio", {k: esc(lt.kansio || "")})}</small></p></div>`;
   }
   if (!x.analyysi) {
     return `${otsikko}${tila}<div class="tyoalue ilman-paneelia"><div class="katselu"><div class="vertailu"><div class="vertailu-tyhja"><div>${x.tila === "virhe" ? "" : t(onKuva(x) ? "vertailu.analysoidaan_kuva" : "vertailu.analysoidaan")}
@@ -825,6 +836,8 @@ function paivitaDynaamiset(x) {
   }
   const lp = $("#levy-palkki");
   if (lp) lp.style.width = `${(100 * ((x.levy || {}).edistys || 0)).toFixed(1)}%`;
+  const llp = $("#lataus-palkki");
+  if (llp) llp.style.width = `${(100 * ((x.lataus || {}).edistys || 0)).toFixed(1)}%`;
   // esikatselun edistyminen
   const kp = $("#koe-palkki");
   if (kp) kp.style.width = `${Math.round(100 * ((x.koe && x.koe.edistys) || 0))}%`;
@@ -989,6 +1002,76 @@ async function aloitaLevy() {
   hae_kerran();
 }
 
+/* ------------------------------------------------------------ linkistä (YouTube ym.) */
+let linkkiTila = {};
+function laatuTeksti(d) {
+  return d.korkeus ? `${d.korkeus}p${d.fps ? " · " + luku(d.fps) + " fps" : ""}` : "?";
+}
+function piirraLinkki() {
+  const L = linkkiTila, c = $("#linkki-sisalto");
+  $("#linkki-heti").disabled = true;
+  $("#linkki-jonoon").disabled = true;
+  if (L.vaihe === "haetaan") {
+    c.innerHTML = `<p>${t("linkki.haetaan")}</p><div class="edistys epamaarainen"><i></i></div>`;
+  } else if (L.vaihe === "virhe") {
+    c.innerHTML = `<p class="virhe">${t("virhe.lataus_" + (L.virhe || "lataus"))}</p>`;
+  } else if (L.vaihe === "tiedot") {
+    const d = L.tiedot;
+    const rivi = [d.kanava, d.kesto ? kesto(d.kesto) : "", t("linkki.laatu", {l: laatuTeksti(d)}),
+      d.koko ? t("linkki.koko", {k: koko(d.koko)}) : ""].filter(Boolean).map(esc).join(" · ");
+    c.innerHTML = `<h3 class="linkki-nimi">${esc(d.nimi)}</h3><p><small>${rivi}${d.sivu ? " · " + esc(d.sivu) : ""}</small></p>
+      <p class="${d.suositus === "hd" ? "huomio-levy" : "linkki-hyva"}">${t(d.suositus === "hd" ? "linkki.hd" : "linkki.hyva")}</p>
+      ${d.tekstit && d.tekstit.length ? `<label><input type="checkbox" id="linkki-tekstit" ${L.tekstit ? "checked" : ""}>${t("linkki.tekstit", {k: esc(d.tekstit.join(", "))})}</label>` : ""}
+      ${L.kansioPuuttuu ? `<p class="huomio-levy">${t("levy.kansio_puuttuu", {k: esc(L.kansioPuuttuu)})}</p>` : ""}
+      <p class="levy-kansio"><small>${t("levy.kansio", {k: esc(L.kansio || "")})}</small>
+        <button type="button" class="painike pieni toissijainen" id="linkki-vaihda-kansio">${t("levy.vaihda_kansio")}</button></p>`;
+    $("#linkki-tekstit")?.addEventListener("change", e => { L.tekstit = e.target.checked; });
+    $("#linkki-vaihda-kansio").addEventListener("click", async () => {
+      const r = await api("valitse", {laji: "kansio"}).catch(() => ({}));
+      if (linkkiTila !== L || !r.kansio) return;
+      Object.assign(L, {kansio: r.kansio, omaKansio: r.kansio, kansioPuuttuu: null});
+      piirraLinkki();
+    });
+    $("#linkki-jonoon").disabled = false;
+    $("#linkki-heti").disabled = d.suositus === "hd";
+  } else {
+    c.innerHTML = "";
+  }
+}
+async function haeLinkki() {
+  const url = $("#linkki-osoite").value.trim();
+  if (!url) return;
+  if (linkkiTila.url === url && ["haetaan", "tiedot"].includes(linkkiTila.vaihe)) return;
+  const L = linkkiTila = {url, vaihe: "haetaan", tekstit: true};
+  piirraLinkki();
+  const r = await api("linkki_tiedot", {url}).catch(e => ({virhe: String(e.message || e)}));
+  if (linkkiTila !== L) return;
+  if (r.virhe) { Object.assign(L, {vaihe: "virhe", virhe: KAANNOKSET.fi["virhe.lataus_" + r.virhe] ? r.virhe : "lataus"}); piirraLinkki(); return; }
+  L.tiedot = r;
+  L.kansio = r.kansio ? r.kansio.kansio : "";
+  if (r.kansio && !r.kansio.saatavilla) { L.kansioPuuttuu = r.kansio.asetettu; L.omaKansio = r.kansio.kansio; }
+  L.vaihe = "tiedot";
+  piirraLinkki();
+}
+function avaaLinkki() {
+  linkkiTila = {};
+  $("#linkki-osoite").value = "";
+  piirraLinkki();
+  $("#linkki").showModal();
+  $("#linkki-osoite").focus();
+}
+async function aloitaLinkki(heti) {
+  const L = linkkiTila;
+  if (L.vaihe !== "tiedot") return;
+  const d = L.tiedot;
+  const tiedot = {nimi: d.nimi, kanava: d.kanava, sivu: d.sivu, kesto: d.kesto, korkeus: d.korkeus, osat: d.osat};
+  const r = await api("linkki_lisaa", {url: d.url || L.url, tiedot, heti, tekstit: L.tekstit !== false,
+    kansio: L.omaKansio || null}).catch(() => null);
+  $("#linkki").close();
+  if (r && r.id) { valittu = r.id; edellinenTyoAllekirjoitus = ""; ilmoita(t(heti ? "linkki.aloitettu_heti" : "linkki.aloitettu")); }
+  hae_kerran();
+}
+
 /* ------------------------------------------------------------ työkalut (asetuksissa) */
 let tyokaluVersiot = null;
 async function haeTyokalut() {
@@ -998,7 +1081,7 @@ async function haeTyokalut() {
 function piirraTyokalut() {
   const c = $("#tyokalut-sisalto"); if (!c || !$("#asetukset").open) return;
   const v = tyokaluVersiot || {}, p = TILA.tyokalut || {};
-  const kasittely = TILA.jono.kasiteltava || TILA.jono.kasiteltava_kuva || TILA.jono.tyot.some(x => x.tila === "ripataan");
+  const kasittely = TILA.jono.kasiteltava || TILA.jono.kasiteltava_kuva || TILA.jono.tyot.some(x => x.tila === "ripataan" || x.tila === "ladataan");
   const kaynnissa = p.tila === "kaynnissa";
   let tila = "";
   if (kaynnissa) tila = `<span>${t("tyokalut.ladataan." + (p.vaihe || "ffmpeg"))}</span><div class="edistys"><i style="width:${(100 * (p.edistys || 0)).toFixed(1)}%"></i></div>`;
@@ -1006,7 +1089,8 @@ function piirraTyokalut() {
   else if (p.tila === "virhe") tila = `<span class="virhe">${t("tyokalut.virhe." + (p.virhe || "lataus"))}</span>`;
   else if (kasittely) tila = `<span>${t("tyokalut.kasittely")}</span>`;
   const h = `<dl><dt>${t("tyokalut.mpv")}</dt><dd>${v.mpv ? esc(v.mpv) : t("tyokalut.ei_ladattu")}</dd>
-      <dt>${t("tyokalut.ffmpeg")}</dt><dd>${v.ffmpeg ? esc(v.ffmpeg) : "–"}</dd></dl>
+      <dt>${t("tyokalut.ffmpeg")}</dt><dd>${v.ffmpeg ? esc(v.ffmpeg) : "–"}</dd>
+      <dt>${t("tyokalut.ytdlp")}</dt><dd>${v.ytdlp ? esc(v.ytdlp) : t("tyokalut.ei_ladattu_ytdlp")}</dd></dl>
     <div class="tyokalut-rivi"><button type="button" class="painike pieni toissijainen" id="tyokalut-paivita" ${kaynnissa || kasittely ? "disabled" : ""}>${t("tyokalut.paivita")}</button>${tila}</div>`;
   if (c.dataset.html !== h) {
     c.innerHTML = h; c.dataset.html = h;
@@ -1084,6 +1168,13 @@ function kytkeAsetukset() {
   }));
   $("#paivitys-nappi").addEventListener("click", avaaPaivitys);
   $("#lisaa-levy").addEventListener("click", avaaLevy);
+  $("#lisaa-linkki").addEventListener("click", avaaLinkki);
+  $("#linkki-hae").addEventListener("click", haeLinkki);
+  $("#linkki-osoite").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); haeLinkki(); } });
+  $("#linkki-osoite").addEventListener("paste", () => setTimeout(haeLinkki, 0));
+  $("#linkki-heti").addEventListener("click", () => aloitaLinkki(true));
+  $("#linkki-jonoon").addEventListener("click", () => aloitaLinkki(false));
+  $("#linkki").addEventListener("close", () => { linkkiTila = {}; });
   $("#levy-aloita").addEventListener("click", aloitaLevy);
   $("#levy-katso").addEventListener("click", katsoLevylta);
   $("#levy").addEventListener("close", () => { levyTila = {}; });

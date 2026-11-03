@@ -6,6 +6,7 @@ laskevat järkevän tuloksen numpy-referenssillä, ja että palvelin vastaa.
 import json
 import os
 import sys
+import time
 import traceback
 import tempfile
 import urllib.request
@@ -243,6 +244,37 @@ assert m.aika_korjaus()["suhde"]["2"] == _ka["suhde"]["2"]
 assert m.aika_korjaus()["loppu_s_min"] == m.LOPPU_OLETUS_S_MIN
 print("levy ja soitin OK")
 
+# lataus linkistä: yt-dlp:n tiedot, edistys ja virheet (oikea lataus CI:n lataustestissä)
+from pixeli import lataus as _la  # noqa: E402
+_li = _la.jasenna_tiedot({"title": "Vanha video", "uploader": "Kanava", "duration": 245.0, "id": "abc",
+                          "extractor_key": "Youtube", "webpage_url": "https://www.youtube.com/watch?v=abc",
+                          "requested_formats": [{"format_id": "135", "vcodec": "avc1", "height": 480, "width": 854,
+                                                 "fps": 30, "filesize": 20_000_000},
+                                                {"format_id": "140", "vcodec": "none", "filesize_approx": 4_000_000}],
+                          "subtitles": {"fi": [], "en-US": [], "de": [], "live_chat": []}})
+assert (_li["korkeus"], _li["koko"], _li["tekstit"], _li["fps"]) == (480, 24_000_000, ["en-US", "fi"], 30.0), _li
+assert _la.suositus(480) == "hyva" and _la.suositus(1080) == "hd"
+for _d, _a in (({"_type": "playlist"}, "soittolista"), ({"live_status": "is_live"}, "suora")):
+    try:
+        _la.jasenna_tiedot(_d)
+        raise AssertionError(_a)
+    except _la.LatausVirhe as _e:
+        assert _e.avain == _a
+_le = _la.Edistys(_li["osat"])
+assert _le.rivi("[download] muu") is None
+assert abs(_le.rivi("PIXELI|10000000|20000000|NA|135") - 10 / 24) < 1e-6
+assert abs(_le.rivi("PIXELI|20000000|20000000|NA|135") - 20 / 24) < 1e-6
+assert _le.rivi("PIXELI|4000000|NA|4100000|140") > 0.98
+assert _la.virheavain("ERROR: [youtube] abc: Sign in to confirm your age") == "ika"
+assert _la.virheavain("ERROR: [youtube] abc: Video unavailable") == "ei_saatavilla"
+assert _la.virheavain("ERROR: something else") == "lataus"
+try:
+    _la.tiedot("ei osoite")
+    raise AssertionError("ei_linkki")
+except _la.LatausVirhe as _e:
+    assert _e.avain == "ei_linkki"
+print("lataus OK")
+
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
 sov = palvelin.Sovellus(jono, ymp)
@@ -258,6 +290,31 @@ req = urllib.request.Request(f"http://127.0.0.1:{sov.portti}/api/asetukset", dat
                              headers={"X-Pixeli-Avain": sov.avain, "Content-Type": "application/json"}, method="POST")
 urllib.request.urlopen(req, timeout=10).read()
 assert m.teho_osuus() == 0.65 and jono.asetukset["teho"] == "tasapaino"
+# linkistä jonoon (lataus korvattu): tallennus valittuun kansioon, "heti" käynnistää käsittelyn analyysin jälkeen
+_vanha_lataa = _la.lataa
+with tempfile.TemporaryDirectory() as _kd:
+    def _vale_lataa(url, kansio, osat=None, tekstit=True, edistys=None, peruuta=None):
+        Path(kansio).mkdir(parents=True, exist_ok=True)
+        q = Path(kansio) / "Vanha video [abc].mkv"
+        q.write_bytes(b"ei oikea video")
+        edistys and edistys(1.0)
+        return q
+    _la.lataa = _vale_lataa
+    _r = jono.lisaa_linkista("https://example.com/v", {"nimi": "Vanha video", "korkeus": 480}, heti=True,
+                             kansio=_kd)
+    for _ in range(100):
+        _t = jono._tyo(_r["id"])
+        if _t["tila"] != "ladataan":
+            break
+        time.sleep(0.1)
+    assert Path(_t["polku"]) == Path(_kd) / "Vanha video [abc].mkv" and _t["tila"] in ("analysoidaan", "virhe"), _t
+    assert not any(Path(_kd).glob(".pixeli_lataus_*"))
+    _r2 = jono.lisaa_linkista("https://example.com/hd", {"nimi": "HD", "korkeus": 1080}, heti=True, kansio=_kd)
+    assert jono._tyo(_r2["id"])["lataus"]["kasittele"] is False      # HD:tä ei käsitellä
+    time.sleep(1.0)
+    for _x in (_r, _r2):
+        jono.poista(_x["id"])
+_la.lataa = _vanha_lataa
 print("Palvelin OK, versio", tila["versio"])
 print("SAVUTESTI OK")
 os._exit(0)

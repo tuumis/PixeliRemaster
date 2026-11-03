@@ -155,6 +155,19 @@ class Sovellus:
                 kohde = (t.get("tulos") or {}).get("ulos") or t["polku"]
                 asennus.avaa_kansio(kohde)
             return {}
+        if polku == "linkki_tiedot":
+            from . import lataus
+            try:
+                tiedot = lataus.tiedot(d.get("url") or "")
+            except lataus.LatausVirhe as e:
+                return {"virhe": e.avain, "tieto": (e.tieto or "")[-300:]}
+            except Exception as e:  # noqa: BLE001
+                m.loki(f"Linkin tietoja ei saatu: {e}")
+                return {"virhe": "lataus", "tieto": str(e)[-300:]}
+            return tiedot | {"suositus": lataus.suositus(tiedot["korkeus"]), "kansio": j.levykansio_tiedot()}
+        if polku == "linkki_lisaa":
+            return j.lisaa_linkista(d.get("url") or "", d.get("tiedot") or {}, heti=bool(d.get("heti", True)),
+                                    tekstit=bool(d.get("tekstit", True)), kansio=d.get("kansio") or None)
         if polku == "levy_asemat":
             return levy.kaikki_asemat() | {"kansio": j.levykansio_tiedot()}
         if polku == "levy_nimikkeet":

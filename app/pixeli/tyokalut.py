@@ -1,4 +1,4 @@
-"""PixeliRemaster – soittimen (mpv) ja videotyökalujen (ffmpeg, ffprobe) päivitys asetuksista.
+"""PixeliRemaster – soittimen (mpv), videotyökalujen (ffmpeg, ffprobe) ja lataajan (yt-dlp) päivitys asetuksista.
 
 Työkalut ladataan ensimmäisellä käytöllä eivätkä päivity itsestään: lukittu versio ei voi
 yllättäen muuttaa käsittelyä. Käyttäjä voi päivittää ne uusimpiin, kun mitään ei käsitellä.
@@ -29,7 +29,8 @@ def ffmpeg_versio():
 
 
 def tiedot():
-    return {"mpv": soitin.versio(), "ffmpeg": ffmpeg_versio(), "paivitys": dict(TILA)}
+    from . import lataus
+    return {"mpv": soitin.versio(), "ffmpeg": ffmpeg_versio(), "ytdlp": lataus.versio(), "paivitys": dict(TILA)}
 
 
 def _paivita_ffmpeg(edistys):
@@ -75,7 +76,7 @@ def _paivita_ffmpeg(edistys):
 
 
 def paivita(jono):
-    if jono._kasiteltava or jono._kasiteltava_kuva or jono._ripattava:
+    if jono._kasiteltava or jono._kasiteltava_kuva or jono._ripattava or getattr(jono, "_ladattava", None):
         raise RuntimeError("kasittely_kaynnissa")
     with _lukko:
         if TILA["tila"] == "kaynnissa":
@@ -90,8 +91,12 @@ def paivita(jono):
             TILA.update({"vaihe": "mpv", "edistys": 0.5})
 
             def ed_mpv(f):
-                TILA["edistys"] = round(0.5 + 0.5 * f, 3)
+                TILA["edistys"] = round(0.5 + 0.45 * f, 3)
             soitin.lataa(ed_mpv)
+            from . import lataus
+            if lataus.ytdlp_exe():
+                TILA.update({"vaihe": "ytdlp", "edistys": 0.95})
+                lataus.varmista(pakota_tarkistus=True)
             TILA.update({"tila": "valmis", "vaihe": None, "edistys": 1.0})
             m.loki(f"Työkalut päivitetty: ffmpeg {ffmpeg_versio()}, mpv {soitin.versio()}")
         except Exception as e:  # noqa: BLE001
