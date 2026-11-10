@@ -1346,8 +1346,9 @@ function kytkeAsetukset() {
   $("#th-hae").addEventListener("click", haeTekstit);
   $("#th-kysely").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); if (thApi()) haeTekstit(); else $("#th-selain").click(); } });
   $("#th-selain").addEventListener("click", async () => {
-    await api("tekstihaku_selain", {kysely: $("#th-kysely").value.trim(), kieli: $("#th-kieli").value}).catch(() => null);
-    piirraTh({vaihe: "selain"});
+    const r = await api("tekstihaku_selain", {kysely: $("#th-kysely").value.trim(), kieli: $("#th-kieli").value})
+      .catch(e => ({virhe: "selain", tieto: String(e.message || e)}));
+    piirraTh(r && r.virhe ? {vaihe: "virhe", virhe: "selain", tieto: r.tieto} : {vaihe: "selain"});
   });
   $("#th-tiedosto").addEventListener("click", async () => {
     const L = thTila; if (!L.id) return;

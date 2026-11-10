@@ -179,7 +179,6 @@ class Sovellus:
             asennus.avaa_tiedosto(tekstihaku.hakusivu(d.get("kysely") or "", d.get("kieli") or "fi", kieli))
             return {}
         if polku in ("tekstihaku", "tekstihaku_lisaa"):
-            from . import tekstihaku
             try:
                 if polku == "tekstihaku":
                     return {"tulokset": j.hae_tekstit(d["id"], str(d.get("kysely") or "").strip(),

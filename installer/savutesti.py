@@ -390,6 +390,16 @@ with tempfile.TemporaryDirectory() as _kd:
     jono.poista_nettiteksti(_tid, _nt[0]["file_id"])
     assert "nettitekstit" not in jono._tyo(_tid)["valinta"]
     jono.poista(_tid)
+# "Etsi selaimessa" avaa OpenSubtitlesin hakusivun (selaimen avaus korvattu)
+_avatut = []
+_vanha_avaa = asennus.avaa_tiedosto
+asennus.avaa_tiedosto = _avatut.append
+try:
+    assert sov.api("tekstihaku_selain", {"kysely": "Taru sormusten herrasta", "kieli": "fi"}) == {}
+finally:
+    asennus.avaa_tiedosto = _vanha_avaa
+assert _avatut == ["https://www.opensubtitles.org/fi/search2/sublanguageid-fin/moviename-Taru+sormusten+herrasta"] \
+    or _avatut[0].startswith("https://www.opensubtitles.org/"), _avatut
 # uudet asetukset siistitään; ajastus ja jälkityöt näkyvät tilassa
 jono.tallenna_asetukset({"sulje": "jotain", "puhelin_korkeus": 999, "opensubtitles_avain": "  abc  ",
                          "ajastus": {"paalla": True, "alku": "23:15", "loppu": "06:45"}})

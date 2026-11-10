@@ -83,6 +83,8 @@ jobs:
           python -m pip install --disable-pip-version-check -q pyflakes
           $nimet = python -m pyflakes app installer 2>&1 | Select-String "undefined name"
           if ($nimet) { $nimet | ForEach-Object { Write-Host "::error title=pyflakes::$_" }; throw "määrittelemätön nimi" }
+          python installer/tuontitarkistus.py app
+          if ($LASTEXITCODE -ne 0) { throw "funktion sisäinen tuonti varjostaa moduulitason nimen" }
           python installer/torchtesti.py
           if ($LASTEXITCODE -ne 0) { throw "torchtesti epäonnistui" }
 

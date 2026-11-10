@@ -1,3 +1,6 @@
+**Korjattu 1.14.2:** Lisää tekstitys → Etsi selaimessa ei avannut selainta. Jos selainta ei voida avata, ohjelma kertoo sen.
+**Fixed in 1.14.2:** Add subtitles → Search in browser didn't open the browser. If the browser can't be opened, the program now says so.
+
 **Uutta 1.14.1:** Tekstitykset ilman API-avainta: "Lisää tekstitys…" avaa haun selaimeen valmiiksi elokuvan nimellä, ja ladatun tekstityksen (.srt, .vtt, .ass, .ssa) voi valita tai vetää ohjelman ikkunaan. Ohjelma lisää sen omaksi raidakseen, korjaa merkistön ja sovittaa PAL-DVD:n nopeuseron. Suora OpenSubtitles-haku toimii edelleen, jos asetuksissa on oma API-avain.
 **New in 1.14.1:** Subtitles without an API key: "Add subtitles…" opens the search in your browser with the movie title filled in, and you can choose or drag the downloaded subtitles (.srt, .vtt, .ass, .ssa) onto the program window. The program adds them as their own track, fixes the character encoding and adjusts PAL DVD speed differences. Direct OpenSubtitles search still works if you add your own API key in Settings.
 
