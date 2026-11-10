@@ -54,4 +54,5 @@ Varjostimet ovat muuttamattomia. / The shaders are unmodified.
 | MakeMKV | oma lisenssi / proprietary | ei mukana – Blu-ray-levyille käytetään käyttäjän itse asentamaa ohjelmaa / not included – the user's own installation is used for Blu-rays; https://www.makemkv.com |
 | yt-dlp | Unlicense | ladataan ensimmäisellä käytöllä (Linkistä) / downloaded on first use (From link); https://github.com/yt-dlp/yt-dlp |
 | Deno (yt-dlp:n JavaScript-ajoympäristö / JavaScript runtime for yt-dlp) | MIT | ladataan yt-dlp:n mukana / downloaded with yt-dlp; https://deno.com |
+| OpenSubtitles.com (palvelu / service) | palvelun ehdot / terms of service | tekstitysten haku käyttäjän pyynnöstä / subtitle search on request; https://www.opensubtitles.com |
 | Barlow-kirjasin / typeface | SIL Open Font License 1.1 | `app/web/fontit/OFL.txt` |

@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import asennus
+from . import asennus, tekstihaku
 from . import kuvat
 from . import lisamallit
 from . import moottori as m
@@ -69,7 +69,8 @@ class Sovellus:
                 "kieli_jarjestelma": self.kieli_jarjestelma,
                 "ikkuna": self.ikkuna.tila if self.ikkuna else "selain",
                 "datakansio": str(m.DATA), "paivitys": paivitys.tila(), "soitin": soitin.tila(), "tyokalut": dict(tyokalut.TILA),
-                "makemkv": bool(levy.makemkvcon()), "aika_korjaus": m.aika_korjaus(), "aika": time.time()}
+                "makemkv": bool(levy.makemkvcon()), "aika_korjaus": m.aika_korjaus(),
+                "os_sisainen": bool(tekstihaku.sovellusavain({})), "aika": time.time()}
 
     # ------------------------------------------------------------ API
     def api(self, polku, d):
@@ -144,6 +145,12 @@ class Sovellus:
                 asennus.avaa_kansio(m.LOKI if m.LOKI.exists() else m.DATA)
             elif d.get("mita") == "data":
                 asennus.avaa_kansio(m.DATA)
+            elif d.get("mita") in ("jalki", "jalki_kansio"):
+                t = j._tyo(d["id"])
+                p_ = ((t.get("jalki") or {}).get(d.get("laji")) or {}).get("polku")
+                if not p_ or not Path(p_).is_file():
+                    raise KeyError("tiedostoa_ei_loydy")
+                (asennus.avaa_tiedosto if d["mita"] == "jalki" else asennus.avaa_kansio)(p_)
             elif d.get("mita") == "tiedosto":
                 t = j._tyo(d["id"])
                 ulos = (t.get("tulos") or {}).get("ulos")
@@ -154,6 +161,27 @@ class Sovellus:
                 t = j._tyo(d["id"])
                 kohde = (t.get("tulos") or {}).get("ulos") or t["polku"]
                 asennus.avaa_kansio(kohde)
+            return {}
+        if polku == "jalkityo":
+            return j.jalkityo(d["id"], d.get("laji"))
+        if polku == "tekstihaku_ehdotus":
+            return j.tekstihaku_ehdotus(d["id"])
+        if polku in ("tekstihaku", "tekstihaku_lisaa"):
+            from . import tekstihaku
+            try:
+                if polku == "tekstihaku":
+                    return {"tulokset": j.hae_tekstit(d["id"], str(d.get("kysely") or "").strip(),
+                                                      d.get("kieli") or "fi", d.get("vuosi") or None)}
+                return j.lisaa_nettiteksti(d["id"], d.get("tulos") or {}, d.get("kieli") or "fi")
+            except tekstihaku.TekstiVirhe as e:
+                return {"virhe": e.avain, "tieto": e.tieto}
+        if polku == "tekstihaku_poista":
+            j.poista_nettiteksti(d["id"], d.get("file_id"))
+            return {}
+        if polku == "lopeta_ohjelma":
+            ik = getattr(self, "ikkuna", None)
+            if ik is not None and hasattr(ik, "lopeta"):
+                threading.Thread(target=ik.lopeta, daemon=True).start()
             return {}
         if polku == "linkki_tiedot":
             from . import lataus

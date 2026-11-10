@@ -275,6 +275,50 @@ except _la.LatausVirhe as _e:
     assert _e.avain == "ei_linkki"
 print("lataus OK")
 
+# ajastus: yön yli menevä ikkuna, pelkkä alkuaika, virheelliset arvot
+from pixeli import tyojono as _tj2  # noqa: E402
+_klo = lambda h, mi: time.struct_time((2026, 1, 1, h, mi, 0, 0, 1, -1))  # noqa: E731
+_a = {"paalla": True, "alku": "23:00", "loppu": "07:00"}
+assert _tj2.ajastus_ikkunassa(_a, _klo(23, 30)) and _tj2.ajastus_ikkunassa(_a, _klo(3, 0))
+assert not _tj2.ajastus_ikkunassa(_a, _klo(7, 0)) and not _tj2.ajastus_ikkunassa(_a, _klo(12, 0))
+assert _tj2.ajastus_ikkunassa({"alku": "01:00", "loppu": "05:30"}, _klo(5, 29))
+assert not _tj2.ajastus_ikkunassa({"alku": "01:00", "loppu": "05:30"}, _klo(0, 59))
+assert _tj2.ajastus_ikkunassa({"alku": "22:00", "loppu": ""}, _klo(22, 0)) and not _tj2.ajastus_ikkunassa({"alku": "22:00"}, _klo(21, 59))
+assert _tj2.siisti_ajastus({"paalla": 1, "alku": "7:5", "loppu": "25:00"}) == {"paalla": True, "alku": "07:05", "loppu": ""}
+assert _tj2.siisti_ajastus({"alku": "x", "loppu": "23:00"}) == {"paalla": False, "alku": "23:00", "loppu": ""}
+
+# tekstitykset netistä: hakusana nimestä, tulosten järjestys, PAL-nopeus, ajansiirto, tiedostotunniste
+from pixeli import tekstihaku as _th  # noqa: E402
+assert _th.ehdotettu_haku("Taru_sormusten_herrasta.2001.DVD.PAL [abc].mkv") == ("Taru sormusten herrasta", 2001)
+assert _th.ehdotettu_haku("STAR WARS.mkv")[0] == "Star Wars"
+assert _th.ehdotettu_haku("Vanha video [xyz123].mkv") == ("Vanha video", None)
+_tt = _th.jasenna_tulokset({"data": [
+    {"id": "1", "attributes": {"release": "A", "download_count": 900, "machine_translated": True, "files": [{"file_id": 1}]}},
+    {"id": "2", "attributes": {"release": "B", "download_count": 50, "from_trusted": True, "files": [{"file_id": 2}]}},
+    {"id": "3", "attributes": {"release": "C", "download_count": 10, "moviehash_match": True, "files": [{"file_id": 3}]}},
+    {"id": "4", "attributes": {"release": "CD", "files": [{"file_id": 4}, {"file_id": 5}]}}]})
+assert [r["file_id"] for r in _tt] == [3, 2, 1], _tt
+assert abs(_th.nopeuskerroin(23.976, 25) - 0.95904) < 1e-4 and _th.nopeuskerroin(25, 25) == 1.0
+assert _th.nopeuskerroin(0, 25) == 1.0 and abs(_th.nopeuskerroin(25, 23.976) - 1.0427) < 1e-3
+assert _th.sovita_srt("1\n00:01:40,000 --> 00:01:42,500\nHei\n", 0.5, 1.0) == "1\n00:00:51,000 --> 00:00:52,250\nHei\n"
+with tempfile.TemporaryDirectory() as _d:
+    import random as _rnd  # noqa: E402
+    _rnd.seed(3)
+    _b = bytes(_rnd.getrandbits(8) for _ in range(200_000))
+    (Path(_d) / "v.bin").write_bytes(_b)
+    _h = len(_b)
+    for _alku in (0, len(_b) - 65536):
+        for _i in range(_alku, _alku + 65536, 8):
+            _h = (_h + int.from_bytes(_b[_i:_i + 8], "little")) % (1 << 64)
+    assert _th.tiedostotunniste(Path(_d) / "v.bin") == f"{_h:016x}"
+try:
+    _th._pyynto("", "/subtitles")
+    raise AssertionError("avain_puuttuu")
+except _th.TekstiVirhe as _e:
+    assert _e.avain == "avain_puuttuu"
+assert _th.sovellusavain({"opensubtitles_avain": " oma "}) == "oma"
+print("ajastus ja tekstihaku OK")
+
 ymp = asennus.Ymparisto()
 jono = tyojono.Jono(ymp)
 sov = palvelin.Sovellus(jono, ymp)
@@ -315,6 +359,18 @@ with tempfile.TemporaryDirectory() as _kd:
     for _x in (_r, _r2):
         jono.poista(_x["id"])
 _la.lataa = _vanha_lataa
+# uudet asetukset siistitään; ajastus ja jälkityöt näkyvät tilassa
+jono.tallenna_asetukset({"sulje": "jotain", "puhelin_korkeus": 999, "opensubtitles_avain": "  abc  ",
+                         "ajastus": {"paalla": True, "alku": "23:15", "loppu": "06:45"}})
+assert (jono.asetukset["sulje"], jono.asetukset["puhelin_korkeus"], jono.asetukset["opensubtitles_avain"]) == \
+    ("ilmaisin", 720, "abc"), jono.asetukset
+_ti = jono.tila()["ajastus"]
+assert _ti["paalla"] and _ti["alku"] == "23:15" and _ti["loppu"] == "06:45" and "odottaa" in _ti
+jono.tallenna_asetukset({"ajastus": {"paalla": False}, "opensubtitles_avain": ""})
+assert jono.ajastus_sallii()
+req = urllib.request.Request(f"http://127.0.0.1:{sov.portti}/api/tila", headers={"X-Pixeli-Avain": sov.avain})
+_tila2 = json.loads(urllib.request.urlopen(req, timeout=10).read())
+assert "os_sisainen" in _tila2 and "ajastus" in _tila2["jono"]
 print("Palvelin OK, versio", tila["versio"])
 print("SAVUTESTI OK")
 os._exit(0)

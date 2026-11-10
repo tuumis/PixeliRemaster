@@ -54,6 +54,7 @@
     <label class="teho" id="teho-rivi"><span data-t="teho.otsikko"></span>
       <select id="teho"><option value="taysi" data-t="teho.taysi"></option><option value="tasapaino" data-t="teho.tasapaino"></option><option value="hiljainen" data-t="teho.hiljainen"></option></select></label>
     <label class="valinta"><input type="checkbox" id="sammuta"><span data-t="jono.sammuta"></span></label>
+    <button class="painike pieni haamu" type="button" id="ajastus-nappi"></button>
     <button class="painike ensisijainen" id="jono-nappi"></button>
   </footer>
 </div>
@@ -87,6 +88,23 @@
       <p class="selite" data-t="katselu.selite"></p>
     </fieldset>
     <fieldset>
+      <legend data-t="sulje.otsikko"></legend>
+      <label class="radio"><input type="radio" name="sulje" value="ilmaisin"><span data-t="sulje.ilmaisin"></span></label>
+      <label class="radio"><input type="radio" name="sulje" value="lopeta"><span data-t="sulje.lopeta"></span></label>
+    </fieldset>
+    <fieldset>
+      <legend data-t="puhelin.otsikko"></legend>
+      <label class="radio"><input type="radio" name="puhelin_korkeus" value="720"><span data-t="puhelin.720"></span></label>
+      <label class="radio"><input type="radio" name="puhelin_korkeus" value="1080"><span data-t="puhelin.1080"></span></label>
+    </fieldset>
+    <fieldset>
+      <legend data-t="os.otsikko"></legend>
+      <p class="selite" data-t="os.selite"></p>
+      <div class="linkki-rivi"><input type="text" id="os-avain" autocomplete="off" spellcheck="false" data-t-placeholder="os.avain_paikka">
+        <button type="button" class="painike pieni toissijainen" id="os-tallenna" data-t="os.tallenna"></button></div>
+      <p class="selite" id="os-tila"></p>
+    </fieldset>
+    <fieldset>
       <legend data-t="tyokalut.otsikko"></legend>
       <p class="selite" data-t="tyokalut.selite"></p>
       <div id="tyokalut-sisalto" class="tyokalut-sisalto"></div>
@@ -97,6 +115,7 @@
     </details>
     <div class="toiminnot">
       <button class="painike haamu" type="button" id="avaa-loki" data-t="yleinen.avaa_loki"></button>
+      <button class="painike haamu" type="button" id="lopeta-ohjelma" data-t="yleinen.lopeta_ohjelma"></button>
       <button class="painike ensisijainen" value="ok" data-t="yleinen.sulje"></button>
     </div>
   </form>
@@ -128,6 +147,42 @@
       <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
       <button class="painike toissijainen" type="button" id="linkki-jonoon" data-t="linkki.jonoon" disabled></button>
       <button class="painike ensisijainen" type="button" id="linkki-heti" data-t="linkki.heti" disabled></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="ajastus" class="dialogi">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 data-t="ajastus.otsikko"></h2>
+    <p data-t="ajastus.ohje"></p>
+    <label class="valinta"><input type="checkbox" id="ajastus-paalla"><span data-t="ajastus.paalla"></span></label>
+    <div class="ajastus-ajat">
+      <label><span data-t="ajastus.alku"></span> <input type="time" id="ajastus-alku" step="300"></label>
+      <label class="valinta"><input type="checkbox" id="ajastus-loppu-paalla"><span data-t="ajastus.loppu"></span></label>
+      <input type="time" id="ajastus-loppu" step="300">
+    </div>
+    <p class="selite" data-t="ajastus.selite"></p>
+    <div class="toiminnot">
+      <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
+      <button class="painike ensisijainen" type="button" id="ajastus-tallenna" data-t="ajastus.tallenna"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="tekstihaku" class="dialogi">
+  <form method="dialog" class="dialogi-sisalto">
+    <h2 data-t="th.otsikko"></h2>
+    <div class="linkki-rivi">
+      <input type="text" id="th-kysely" autocomplete="off" spellcheck="false" data-t-placeholder="th.paikka">
+      <input type="number" id="th-vuosi" min="1900" max="2100" class="th-vuosi" data-t-placeholder="th.vuosi">
+      <select id="th-kieli"><option value="fi">Suomi</option><option value="en">English</option><option value="sv">Svenska</option></select>
+      <button class="painike toissijainen" type="button" id="th-hae" data-t="linkki.hae"></button>
+    </div>
+    <div id="th-sisalto" class="th-sisalto"></div>
+    <p class="linkki-oikeudet"><small data-t="th.lahde"></small></p>
+    <div class="toiminnot">
+      <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
+      <button class="painike ensisijainen" type="button" id="th-lisaa" data-t="th.lisaa" disabled></button>
     </div>
   </form>
 </dialog>

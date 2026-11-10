@@ -59,6 +59,8 @@ jobs:
 
       - name: Kokoa Python-ympäristö ja sovellus
         shell: pwsh
+        env:
+          OPENSUBTITLES_AVAIN: ${{ secrets.OPENSUBTITLES_API_KEY }}
         run: ./installer/rakenna.ps1
 
       - name: Savutesti
@@ -134,6 +136,17 @@ jobs:
           $env:PIXELI_DATA = $data
           ./build/python/python.exe installer/lataustesti.py $data
           if ($LASTEXITCODE -ne 0) { throw "lataustesti epäonnistui" }
+
+      - name: Jälkityöt, äänen puhdistus, tekstitykset netistä, ilmaisinalue
+        shell: pwsh
+        env:
+          PIXELI_OPENSUBTITLES: ${{ secrets.OPENSUBTITLES_API_KEY }}
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "pixeli_jalki"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:PIXELI_DATA = $data
+          ./build/python/python.exe installer/jalkitesti.py (Join-Path $data "tyo")
+          if ($LASTEXITCODE -ne 0) { throw "jalkitesti epäonnistui" }
 
       - name: Tekstitysten tunnistus (Windowsin OCR)
         shell: pwsh

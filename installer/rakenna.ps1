@@ -55,6 +55,11 @@ Vaihe "Kopioidaan sovellus"
 $app = Join-Path $build "app"
 Copy-Item -Recurse (Join-Path $juuri "app") $app
 Get-ChildItem $app -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
+# OpenSubtitlesin sovellusavain (GitHubin salaisuus OPENSUBTITLES_API_KEY), jos asetettu
+if ($env:OPENSUBTITLES_AVAIN) {
+  @{ opensubtitles = $env:OPENSUBTITLES_AVAIN } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $app "pixeli\avaimet.json")
+  Vaihe "OpenSubtitles-avain lisätty"
+}
 Get-ChildItem (Join-Path $build "python") -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 
 # versio sovelluksen lähdekoodista

@@ -347,3 +347,19 @@ button,input,select{font:inherit;color:inherit}
 .linkki-nimi{margin:6px 0 2px;font-size:16px}
 .linkki-hyva{color:var(--vihrea);font-size:13.5px}
 .linkki-oikeudet{color:var(--hiljainen);margin:12px 0 0}
+/* tekstitykset netistä, jälkityöt, ajastus */
+.lappu-th{display:inline-flex;align-items:center;gap:4px;background:var(--nosto);border:1px solid var(--viiva);border-radius:var(--r);padding:2px 8px;font-size:12.5px;margin-right:6px}
+.lappu-th .linkki{padding:0 2px;font-size:14px;line-height:1}
+.jalki-rivi{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:8px;font-size:13px}
+.jalki-osa{display:inline-flex;align-items:center;gap:8px}
+.th-vuosi{width:84px;flex:none !important}
+.th-sisalto{min-height:60px;max-height:min(46vh,420px);overflow:auto}
+.th-lista{display:flex;flex-direction:column;gap:2px}
+.th-tulos{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:var(--r);cursor:pointer}
+.th-tulos:hover{background:var(--nosto)}
+.th-tulos input{margin-top:3px}
+.th-tulos strong{font-weight:600;word-break:break-word}
+.th-merkki{color:var(--vihrea);font-weight:600}
+.ajastus-ajat{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:10px 0}
+.ajastus-ajat input[type=time]{font:inherit;padding:5px 8px;border-radius:var(--r);border:1px solid var(--viiva);background:var(--tausta);color:var(--teksti);color-scheme:dark}
+#ajastus-nappi.aktiivinen{color:var(--keltainen);border-color:var(--keltainen)}

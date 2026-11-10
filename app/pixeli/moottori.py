@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.13.0"
+VERSIO = "1.14.0"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -924,6 +924,18 @@ def puhe_suodin(kanavat):
     return f"{alku},{PUHE_DYNAMIIKKA}"
 
 
+# Vanhan äänen puhdistus (VHS, TV- ja verkkotallenteet): suhina, humina ja rätinä. Signaalinkäsittely eikä
+# puheeseen opetettu tekoäly, koska puhemallit vaimentavat elokuvien musiikin ja tehosteet "kohinana".
+AANIPUHDISTUS = {
+    "kevyt": "highpass=f=25,afftdn=nr=9:nf=-46:tn=1",
+    "voimakas": "highpass=f=45,adeclick=w=55:o=75,afftdn=nr=16:nf=-40:tn=1,afftdn=nr=6:nf=-50",
+}
+
+
+def aanipuhdistus_suodin(taso):
+    return AANIPUHDISTUS.get(taso or "")
+
+
 def yhdista(src, an, osat, lista, ulos, valinta=None, lisatekstit=None):
     """Kokoaa valmiin tiedoston: AI-video + alkuperäiset (tai valitut) ääniraidat, tekstitykset ja kappaleet.
     Lisäksi (valinnaisesti) selkeän puheen stereoraita ja DVD-tekstityksistä tunnistetut tekstiraidat."""
@@ -944,13 +956,27 @@ def yhdista(src, an, osat, lista, ulos, valinta=None, lisatekstit=None):
         pohja += ["-i", str(t_["srt"])]
     ar = an.get("aaniraidat") or []
     puhe = []
-    if valinta.get("puhe") is not False and ar:
+    tee_puhe = valinta.get("puhe") is not False and bool(ar)
+    psuodin = aanipuhdistus_suodin(valinta.get("aanipuhdistus")) if ar else None
+    if tee_puhe or psuodin:
         li = int(aanet[0]) if aanet else 0
         r = next((x for x in ar if int(x.get("i", -1)) == li), ar[0])
         na = len(ar) if aanet is None else len(aanet)
-        puhe = ["-filter_complex", f"[1:a:{li}]{puhe_suodin(r.get('kanavat'))}[puhe]", "-map", "[puhe]",
-                f"-c:a:{na}", "aac", f"-b:a:{na}", "192k", f"-metadata:s:a:{na}", "title=Selkeä puhe (stereo)",
-                f"-metadata:s:a:{na}", f"language={r.get('kieli') or 'und'}", f"-disposition:a:{na}", "default"]
+        kieli = r.get("kieli") or "und"
+        kaaviot, k = [], na
+        if psuodin:                               # puhdistettu ääni omaksi raidaksi, alkuperäinen säilyy
+            kaaviot.append(f"[1:a:{li}]{psuodin}" + (",asplit=2[puhd][puhd2]" if tee_puhe else "[puhd]"))
+            monik = int(r.get("kanavat") or 2) >= 6
+            puhe += ["-map", "[puhd]", f"-c:a:{k}", "aac", f"-b:a:{k}", "384k" if monik else "192k",
+                     f"-metadata:s:a:{k}", "title=Puhdistettu ääni", f"-metadata:s:a:{k}", f"language={kieli}"]
+            oletus, k = k, k + 1
+        if tee_puhe:                              # selkeä puhe (puhdistetusta äänestä, jos valittu)
+            lahde = "[puhd2]" if psuodin else f"[1:a:{li}]"
+            kaaviot.append(f"{lahde}{puhe_suodin(r.get('kanavat'))}[puhe]")
+            puhe += ["-map", "[puhe]", f"-c:a:{k}", "aac", f"-b:a:{k}", "192k",
+                     f"-metadata:s:a:{k}", "title=Selkeä puhe (stereo)", f"-metadata:s:a:{k}", f"language={kieli}"]
+            oletus = k
+        puhe = ["-filter_complex", ";".join(kaaviot)] + puhe + [f"-disposition:a:{oletus}", "default"]
         for i in range(na):
             puhe += [f"-disposition:a:{i}", "0"]
     loppu = ["-map_metadata", "1", "-map_chapters", "1", "-max_interleave_delta", "0",
@@ -990,7 +1016,8 @@ def yhdista(src, an, osat, lista, ulos, valinta=None, lisatekstit=None):
               "levyn sisäisiä tekstityksiä ei voitu kopioida": "tekstit_sisaiset_pois",
               "tekstityksiä ei voitu kopioida": "tekstit_pois"}
     lisatyt = [s_.name for s_ in srt] if huom != "tekstityksiä ei voitu kopioida" else []
-    return {"ulkoiset_tekstitykset": lisatyt, "huomio": koodit.get(huom), "puhe": bool(puhe),
+    return {"ulkoiset_tekstitykset": lisatyt, "huomio": koodit.get(huom), "puhe": bool(puhe) and tee_puhe,
+            "puhdistus": valinta.get("aanipuhdistus") if psuodin else None,
             "tekstiksi": len(lisatekstit) if huom != "tekstityksiä ei voitu kopioida" else 0}
 
 
@@ -1611,6 +1638,14 @@ def kasittele(src, an, geo, valinta, wd, L, ulos, edistys=None, peruuta=None, pi
             edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": 0, "tekstit": ocr.edistys})
         time.sleep(0.5)
     lisatekstit = ocr.tulokset()
+    # OpenSubtitlesista haetut tekstitykset (käyttäjä valitsi itse): oletusraidaksi suomenkielinen
+    netti = [x for x in valinta.get("nettitekstit") or [] if Path(x.get("srt") or "").exists()]
+    if netti:
+        oletus = next((x for x in netti if x.get("kieli") == "fin"), netti[0])
+        for x in lisatekstit:
+            x["oletus"] = False
+        lisatekstit = lisatekstit + [{"srt": x["srt"], "kieli": x.get("kieli") or "und", "otsikko": x.get("otsikko")
+                                      or "OpenSubtitles", "oletus": x is oletus} for x in netti]
     if edistys:
         edistys({"tehty": arvio, "kaikki": arvio, "nopeus": None, "jaljella_s": 0, "yhdistetaan": True})
     osat = [od / f"osa_{int(j):04d}.mkv" for j in sorted(maarat, key=int) if maarat[j] > 0]

@@ -29,6 +29,46 @@ TILAT_KESKEN = ("analysoidaan", "kasitellaan")
 TUETUT = m.VIDEOPAATTEET | kuvat.KUVAPAATTEET
 
 
+AJASTUS_OLETUS = {"paalla": False, "alku": "23:00", "loppu": "07:00"}
+
+
+def _minuutit(hhmm):
+    try:
+        h, mm = str(hhmm).strip().split(":")
+        h, mm = int(h), int(mm)
+        if 0 <= h < 24 and 0 <= mm < 60:
+            return h * 60 + mm
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+def siisti_ajastus(a):
+    a = a or {}
+    alku = a.get("alku") if _minuutit(a.get("alku")) is not None else AJASTUS_OLETUS["alku"]
+    loppu = a.get("loppu") if _minuutit(a.get("loppu")) is not None else ""
+    if loppu and _minuutit(loppu) == _minuutit(alku):
+        loppu = ""
+    f = lambda x: "%02d:%02d" % divmod(_minuutit(x), 60) if x else ""  # noqa: E731
+    return {"paalla": bool(a.get("paalla")), "alku": f(alku), "loppu": f(loppu)}
+
+
+def ajastus_ikkunassa(a, nyt=None):
+    """Onko kellonaika ajastusikkunassa [alku, loppu). Yön yli menevä ikkuna (23–07) tuettu.
+    Ilman loppuaikaa ikkuna on auki alusta vuorokauden loppuun (käsittely jatkuu, kun se on alkanut)."""
+    nyt = nyt or time.localtime()
+    n = nyt.tm_hour * 60 + nyt.tm_min
+    alku = _minuutit(a.get("alku"))
+    loppu = _minuutit(a.get("loppu")) if a.get("loppu") else None
+    if alku is None:
+        return True
+    if loppu is None:
+        return n >= alku
+    if alku < loppu:
+        return alku <= n < loppu
+    return n >= alku or n < loppu
+
+
 def _uusi_id():
     return uuid.uuid4().hex[:10]
 
@@ -38,7 +78,9 @@ class Jono:
         self.ymp = ymparisto
         self.lukko = threading.RLock()
         self.tyot = []
-        self.asetukset = {"kohde": "auto", "ulos_kansio": None, "kieli": "auto", "teho": "taysi", "katselu": "oma"}
+        self.asetukset = {"kohde": "auto", "ulos_kansio": None, "kieli": "auto", "teho": "taysi", "katselu": "oma",
+                          "sulje": "ilmaisin", "puhelin_korkeus": 720, "ajastus": dict(AJASTUS_OLETUS),
+                          "opensubtitles_avain": ""}
         self.sammuta_valmiina = False
         self.sammutus_ajastettu = False
         self._peruuta = threading.Event()
@@ -56,15 +98,25 @@ class Jono:
         self._lataus_q = queue.Queue()
         self._peruuta_lataus = threading.Event()
         self._ladattava = None
+        self._jalki_q = queue.Queue()
+        self._peruuta_jalki = threading.Event()
+        self._jalkityo = None
+        self._ajastus_pysaytti = False
+        self._ajastus_kaynnissa = False
         self._lataa()
         for nimi, kohde in (("analyysi", self._analyysi_saie), ("gpu", self._gpu_saie), ("koe", self._koe_saie),
-                            ("levy", self._levy_saie), ("lataus", self._lataus_saie)):
+                            ("levy", self._levy_saie), ("lataus", self._lataus_saie), ("jalki", self._jalki_saie),
+                            ("ajastus", self._ajastus_saie)):
             threading.Thread(target=kohde, name=nimi, daemon=True).start()
         for t in self.tyot:
             if t["tila"] == "ripataan":          # keskeytynyt rippaus aloitetaan alusta
                 t.setdefault("levy", {})["edistys"] = 0.0
                 self._levy_q.put(t["id"])
                 continue
+            for laji, jt in (t.get("jalki") or {}).items():    # kesken jääneet jälkityöt uudelleen
+                if jt.get("tila") in ("jonossa", "tehdaan"):
+                    jt.update({"tila": "jonossa", "edistys": 0.0})
+                    self._jalki_q.put((t["id"], laji))
             if t["tila"] == "ladataan":          # keskeytynyt lataus jatkuu (yt-dlp jatkaa osittaisesta)
                 t.setdefault("lataus", {})["edistys"] = 0.0
                 self._lataus_q.put(t["id"])
@@ -84,7 +136,9 @@ class Jono:
         d = m.lue_json(self._tiedosto(), {}) or {}
         for t in d.get("tyot", []):
             if t.get("tila") == "kasitellaan" or t.get("tila") == "jonossa":
-                t["tila"] = "odottaa" if t.get("laji") == "kuva" else "keskeytetty"
+                # ajastettu jono odottaa edelleen ajastusta, muuten käyttäjä jatkaa itse
+                ajastettu = (self.asetukset.get("ajastus") or {}).get("paalla")
+                t["tila"] = "odottaa" if t.get("laji") == "kuva" else "jonossa" if ajastettu else "keskeytetty"
             t["koe"] = {k: v for k, v in (t.get("koe") or {}).items() if k != "tila"} | {"tila": (
                 "valmis" if (t.get("koe") or {}).get("tunniste") else "ei")}
             t["koe"].pop("siirretaan", None)
@@ -115,6 +169,15 @@ class Jono:
             for k in ("kohde", "ulos_kansio", "kieli", "teho", "katselu"):
                 if k in uudet:
                     self.asetukset[k] = uudet[k]
+            if "sulje" in uudet:
+                self.asetukset["sulje"] = "lopeta" if uudet["sulje"] == "lopeta" else "ilmaisin"
+            if "puhelin_korkeus" in uudet:
+                self.asetukset["puhelin_korkeus"] = 1080 if int(uudet["puhelin_korkeus"] or 720) == 1080 else 720
+            if "opensubtitles_avain" in uudet:
+                self.asetukset["opensubtitles_avain"] = str(uudet["opensubtitles_avain"] or "").strip()[:64]
+            if "ajastus" in uudet:
+                self.asetukset["ajastus"] = siisti_ajastus(uudet["ajastus"])
+                self._herata.set()
             if "teho" in uudet:
                 m.aseta_teho(self.asetukset["teho"])
                 self.asetukset["teho"] = m._TEHO["taso"]
@@ -426,6 +489,8 @@ class Jono:
                 self._peruuta_levy.set()
             if self._ladattava == tid:
                 self._peruuta_lataus.set()
+            if self._jalkityo == tid:
+                self._peruuta_jalki.set()
             elif t["tila"] == "ladataan":
                 self._poista_latauskansio(t)
             self.tyot.remove(t)
@@ -475,6 +540,11 @@ class Jono:
             for k in ("naarmut", "vari"):          # vanhan kuvan korjaukset
                 if k in valinta:
                     v[k] = True if valinta[k] else None
+            if "aanipuhdistus" in valinta:
+                v["aanipuhdistus"] = valinta["aanipuhdistus"] if valinta["aanipuhdistus"] in m.AANIPUHDISTUS else None
+            for k in ("vertailu", "puhelin"):      # jälkityöt valmiista videosta: tallennetaan vain valinta
+                if k in valinta:
+                    v[k] = True if valinta[k] else None
             for k in ("puhe", "ocr"):              # oletuksena päällä: tallennetaan vain poisvalinta
                 if k in valinta:
                     v[k] = False if valinta[k] is False else None
@@ -496,7 +566,7 @@ class Jono:
             if not v.get("asetus") and lahde.get("analyysi"):
                 v["asetus"] = lahde["analyysi"]["suositus"]
             kopio = {k: v.get(k) for k in ("asetus", "saato", "skaala", "muoto", "laatu", "naarmut", "vari", "puhe",
-                                           "ocr")}
+                                           "ocr", "aanipuhdistus", "vertailu", "puhelin")}
             n = 0
             for t in self.tyot:
                 if t is lahde or t.get("laji") != lahde.get("laji") or t["tila"] not in ("odottaa", "keskeytetty", "virhe"):
@@ -627,6 +697,8 @@ class Jono:
         self._peruuta_levy.set()
         self._peruuta_lataus.set()
         self._lataus_q.put(None)
+        self._peruuta_jalki.set()
+        self._jalki_q.put(None)
         self._koe_q.put(None)
         self._analyysi_q.put(None)
         self._levy_q.put(None)
@@ -660,7 +732,179 @@ class Jono:
             return {"tyot": tyot, "asetukset": self.asetukset, "kohde": list(self.kohde()),
                     "sammuta_valmiina": self.sammuta_valmiina, "sammutus_ajastettu": self.sammutus_ajastettu,
                     "jono_jaljella_s": jaljella if jonossa else None, "kasiteltava": self._kasiteltava,
+                    "ajastus": self.ajastus_tila(),
                     "kasiteltava_kuva": self._kasiteltava_kuva}
+
+    # ------------------------------------------------------------ jälkityöt (ennen/jälkeen-pätkä, puhelinversio)
+    def jalkityo(self, tid, laji):
+        if laji not in ("vertailu", "puhelin"):
+            raise KeyError("tuntematon_jalkityo")
+        with self.lukko:
+            t = self._tyo(tid)
+            if t["tila"] != "valmis" or t.get("laji") == "kuva":
+                raise RuntimeError("ei_valmis")
+            jt = t.setdefault("jalki", {}).get(laji) or {}
+            if jt.get("tila") in ("jonossa", "tehdaan"):
+                return dict(jt)
+            t["jalki"][laji] = {"tila": "jonossa", "edistys": 0.0}
+        self._jalki_q.put((tid, laji))
+        self._tallenna()
+        return {"tila": "jonossa"}
+
+    def _jalki_saie(self):
+        from . import jalki
+        while not self._lopeta:
+            tyo = self._jalki_q.get()
+            if tyo is None:
+                return
+            tid, laji = tyo
+            try:
+                with self.lukko:
+                    t = self._tyo(tid)
+                    jt = (t.get("jalki") or {}).get(laji)
+                    if not jt or jt.get("tila") != "jonossa":
+                        continue
+                    jt["tila"] = "tehdaan"
+                    self._jalkityo = tid
+                    tk = json.loads(json.dumps({k: t.get(k) for k in ("id", "polku", "analyysi", "geo", "tulos")}))
+                    wd = self._wd(t)
+                    korkeus = int(self.asetukset.get("puhelin_korkeus") or 720)
+                    kieli = self.asetukset.get("kieli") if self.asetukset.get("kieli") in ("fi", "en") else "fi"
+                self._peruuta_jalki.clear()
+
+                def ed(f, jt=jt):
+                    with self.lukko:
+                        jt["edistys"] = round(min(1.0, max(0.0, f)), 3)
+                polku = jalki.aja_tyo(tk, wd, laji, korkeus, ed, self._peruuta_jalki, kieli)
+                with self.lukko:
+                    jt.update({"tila": "valmis", "polku": str(polku), "edistys": 1.0, "valmistui": time.time()})
+            except KeyError:
+                pass
+            except m.Peruutettu:
+                with self.lukko:
+                    if not self._lopeta and (t := next((x for x in self.tyot if x["id"] == tid), None)):
+                        (t.get("jalki") or {}).pop(laji, None)
+            except Exception as e:  # noqa: BLE001
+                m.loki(f"Jälkityö {laji} epäonnistui: {traceback.format_exc()}")
+                with self.lukko:
+                    t = next((x for x in self.tyot if x["id"] == tid), None)
+                    if t and (t.get("jalki") or {}).get(laji):
+                        t["jalki"][laji].update({"tila": "virhe", "virhe": str(e)[-400:]})
+            finally:
+                with self.lukko:
+                    self._jalkityo = None
+                self._tallenna()
+                if self._kaikki_valmiit() and self.sammuta_valmiina and not self._lopeta \
+                        and not self.sammutus_ajastettu and self._kasiteltava is None:
+                    self._sammuta()
+
+    # ------------------------------------------------------------ tekstitykset netistä (OpenSubtitles)
+    def tekstihaku_ehdotus(self, tid):
+        from . import tekstihaku
+        with self.lukko:
+            t = self._tyo(tid)
+            nimi = (t.get("levy") or {}).get("nimi") or (t.get("lataus") or {}).get("nimi") or t.get("nimi") or ""
+        kysely, vuosi = tekstihaku.ehdotettu_haku(nimi)
+        return {"kysely": kysely, "vuosi": vuosi}
+
+    def hae_tekstit(self, tid, kysely, kieli="fi", vuosi=None):
+        from . import tekstihaku
+        with self.lukko:
+            t = self._tyo(tid)
+            polku = t.get("polku")
+        return tekstihaku.hae(self.asetukset, kysely, kieli, vuosi, polku)
+
+    def lisaa_nettiteksti(self, tid, tieto, kieli="fi"):
+        """Lataa valitun tekstityksen. Käsittelemättömään videoon se tulee lopulliseen tiedostoon,
+        valmiiseen se lisätään heti."""
+        from fractions import Fraction
+        from . import tekstihaku
+        kieli = kieli if kieli in tekstihaku.KIELET else "fi"
+        with self.lukko:
+            t = self._tyo(tid)
+            if t["tila"] == "kasitellaan":
+                raise RuntimeError("kasittely_kaynnissa")
+            wd = self._wd(t)
+            try:
+                fps = float(Fraction((t.get("analyysi") or {}).get("fps") or "0"))
+            except (ValueError, ZeroDivisionError):
+                fps = 0.0
+        fid = int(tieto["file_id"])
+        r = tekstihaku.lataa(self.asetukset, fid, wd / "nettitekstit" / f"{fid}.srt", fps, tieto.get("fps"))
+        k3, fi_nimi, en_nimi = tekstihaku.KIELET[kieli]
+        merkinta = {"file_id": fid, "srt": r["polku"], "kieli": k3, "nimi": str(tieto.get("nimi") or "")[:200],
+                    "otsikko": f"{fi_nimi if self.asetukset.get('kieli') != 'en' else en_nimi} (OpenSubtitles)",
+                    "kerroin": r["kerroin"]}
+        with self.lukko:
+            t = self._tyo(tid)
+            valmis = t["tila"] == "valmis" and (t.get("tulos") or {}).get("ulos")
+            if valmis:
+                tekstihaku.lisaa_valmiiseen(t["tulos"]["ulos"], r["polku"], k3, merkinta["otsikko"])
+                merkinta["valmiiseen"] = True
+                t.setdefault("tulos", {}).setdefault("nettitekstit", []).append(merkinta)
+            else:
+                v = t.setdefault("valinta", {})
+                v["nettitekstit"] = [x for x in v.get("nettitekstit") or [] if x.get("file_id") != fid] + [merkinta]
+        self._tallenna()
+        return {"jaljella": r.get("jaljella"), "nollaus": r.get("nollaus"), "kerroin": r["kerroin"],
+                "valmiiseen": bool(valmis)}
+
+    def poista_nettiteksti(self, tid, file_id):
+        with self.lukko:
+            t = self._tyo(tid)
+            v = t.get("valinta") or {}
+            v["nettitekstit"] = [x for x in v.get("nettitekstit") or [] if x.get("file_id") != int(file_id)]
+            if not v["nettitekstit"]:
+                v.pop("nettitekstit")
+        self._tallenna()
+
+    # ------------------------------------------------------------ ajastus
+    def ajastus_sallii(self, nyt=None):
+        """Saako videoiden käsittely edetä nyt (ajastus pois tai ajastusikkuna auki)."""
+        a = self.asetukset.get("ajastus") or {}
+        if not a.get("paalla"):
+            return True
+        if self._ajastus_kaynnissa and not a.get("loppu"):
+            return True                          # ilman loppuaikaa jatketaan, kunnes jono on tyhjä
+        return ajastus_ikkunassa(a, nyt)
+
+    def ajastus_tila(self):
+        a = dict(self.asetukset.get("ajastus") or AJASTUS_OLETUS)
+        jonossa = any(t["tila"] == "jonossa" and t.get("laji") != "kuva" for t in self.tyot)
+        a["odottaa"] = bool(a.get("paalla") and jonossa and not self.ajastus_sallii() and not self._kasiteltava)
+        return a
+
+    def _ajastus_saie(self):
+        """Ajastusikkunan alku ja loppu: käsittely käynnistyy tai pysähtyy hallitusti (valmiit osat säilyvät).
+        Kone pidetään hereillä, kun käsittelyä odottaa ajastettu alku."""
+        hereilla = False
+        while not self._lopeta:
+            time.sleep(15)
+            try:
+                a = self.asetukset.get("ajastus") or {}
+                with self.lukko:
+                    jonossa = any(t["tila"] in ("jonossa", "kasitellaan") and t.get("laji") != "kuva"
+                                  for t in self.tyot)
+                if not a.get("paalla"):
+                    self._ajastus_kaynnissa = False
+                elif ajastus_ikkunassa(a):
+                    if jonossa and not self._ajastus_kaynnissa:
+                        m.loki("Ajastettu käsittely alkaa")
+                        self._ajastus_kaynnissa = True
+                    self._herata.set()
+                elif a.get("loppu") and self._kasiteltava and not self._ajastus_pysaytti:
+                    m.loki("Ajastuksen loppu: käsittely pysähtyy ja jatkuu seuraavassa ajastusikkunassa")
+                    self._ajastus_pysaytti = True
+                    self._ajastus_kaynnissa = False
+                    self._peruuta.set()
+                if not jonossa:
+                    self._ajastus_kaynnissa = False
+                odottaa = bool(a.get("paalla") and jonossa and not self._kasiteltava)
+                if odottaa != hereilla:
+                    m.pysy_hereilla(odottaa)
+                    hereilla = odottaa
+            except Exception:  # noqa: BLE001
+                m.loki(f"Ajastus: {traceback.format_exc()}")
 
     # ------------------------------------------------------------ aika-arvio
     @staticmethod
@@ -752,7 +996,9 @@ class Jono:
 
     def _kaikki_valmiit(self):
         with self.lukko:
-            return not any(t["tila"] in ("jonossa", "kasitellaan", "ripataan", "ladataan") for t in self.tyot)
+            return not any(t["tila"] in ("jonossa", "kasitellaan", "ripataan", "ladataan")
+                           or any(j.get("tila") in ("jonossa", "tehdaan") for j in (t.get("jalki") or {}).values())
+                           for t in self.tyot)
 
     def _gpu_saie(self):
         while not self._lopeta:
@@ -775,6 +1021,8 @@ class Jono:
                 return
             t = self._seuraava()
             if t is None:
+                return
+            if not self.ajastus_sallii():
                 return
             tid = t["id"]
             self._peruuta.clear()
@@ -818,6 +1066,9 @@ class Jono:
                     m.loki(f"Aika-arvion korjaus: {ma} -> {d}")
                 except Exception as e:  # noqa: BLE001
                     m.loki(f"Aika-arvion korjausta ei päivitetty: {e}")
+                for laji in ("vertailu", "puhelin"):
+                    if valinta.get(laji):
+                        self.jalkityo(tid, laji)
                 if t.get("levy") and not t["levy"].get("sailyta", True):
                     try:
                         polku.unlink()                  # levyltä kopioitu välitiedosto
@@ -828,7 +1079,9 @@ class Jono:
             except m.Peruutettu:
                 with self.lukko:
                     if t in self.tyot:
-                        t["tila"] = "keskeytetty"
+                        # ajastuksen loppu: video jatkuu valmiista osista seuraavassa ajastusikkunassa
+                        t["tila"] = "jonossa" if self._ajastus_pysaytti else "keskeytetty"
+                    self._ajastus_pysaytti = False
             except Exception as e:  # noqa: BLE001
                 m.loki(f"Käsittely epäonnistui ({polku}): {traceback.format_exc()}")
                 with self.lukko:
