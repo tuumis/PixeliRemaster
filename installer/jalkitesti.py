@@ -75,6 +75,16 @@ s = [v for v in tiedot(ulos)["streams"] if v["codec_type"] == "subtitle"]
 assert len(s) == 1 and s[0]["tags"].get("language") == "fin" and s[0]["disposition"]["default"] == 1, s
 assert len([v for v in tiedot(ulos)["streams"] if v["codec_type"] == "audio"]) == 3
 
+# 2b) oma .ass-tekstitys muunnetaan SRT:ksi ja lisätään valmiiseen tiedostoon
+ass = k / "oma.fi.ass"
+(k / "lahde_ass.srt").write_text("1\n00:00:02,000 --> 00:00:04,000\nTerve!\n", encoding="utf-8")
+aja("-i", str(k / "lahde_ass.srt"), str(ass))
+r = tekstihaku.tuo_tiedosto(ass, k / "oma.srt", videon_kesto=40, videon_fps=25)
+assert "Terve!" in (k / "oma.srt").read_text(encoding="utf-8") and r["kerroin"] == 1.0
+tekstihaku.lisaa_valmiiseen(ulos, k / "oma.srt", "fin", "Suomi")
+s = [v for v in tiedot(ulos)["streams"] if v["codec_type"] == "subtitle"]
+assert len(s) == 2 and [x["disposition"]["default"] for x in s] == [0, 1], s
+
 # 3) ennen/jälkeen-pätkä ja puhelinversio
 e = []
 v = jalki.vertailupatka(src, an, geo, ulos, k / "vertailu.mp4", jalki.vertailun_kohta(src, an, geo, k), edistys=e.append)
@@ -93,7 +103,7 @@ for korkeus, koko in ((720, (960, 720)), (1080, (1440, 1080))):
           [x["codec_name"] for x in ss], round(p.stat().st_size / 1e6, 1), "Mt")
     assert (vv["width"], vv["height"]) == koko and vv["codec_name"] == "h264"
     assert len(aa) == 1 and aa[0]["channels"] == 2 and (aa[0].get("tags") or {}).get("handler_name", "").startswith("Selkeä")
-    assert [x["codec_name"] for x in ss] == ["mov_text"]
+    assert [x["codec_name"] for x in ss] == ["mov_text", "mov_text"]
 print("jälkityöt OK:", jalki.koodain_puhelin()[1])
 
 # 4) OpenSubtitles-lataus: rajapinta korvattu, tiedosto paikalliselta palvelimelta (cp1252, 23,976 fps)

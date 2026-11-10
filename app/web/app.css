@@ -363,3 +363,4 @@ button,input,select{font:inherit;color:inherit}
 .ajastus-ajat{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:10px 0}
 .ajastus-ajat input[type=time]{font:inherit;padding:5px 8px;border-radius:var(--r);border:1px solid var(--viiva);background:var(--tausta);color:var(--teksti);color-scheme:dark}
 #ajastus-nappi.aktiivinen{color:var(--keltainen);border-color:var(--keltainen)}
+.th-napit{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 12px}

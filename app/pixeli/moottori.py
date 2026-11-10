@@ -23,7 +23,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.14.0"
+VERSIO = "1.14.1"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 

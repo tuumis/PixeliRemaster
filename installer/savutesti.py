@@ -317,6 +317,20 @@ try:
 except _th.TekstiVirhe as _e:
     assert _e.avain == "avain_puuttuu"
 assert _th.sovellusavain({"opensubtitles_avain": " oma "}) == "oma"
+assert [_th.arvaa_kieli(n) for n in ("Elokuva.fi.srt", "Elokuva_FIN.srt", "movie.eng.srt", "x.srt")] == ["fi", "fi", "en", None]
+assert _th.hakusivu("Taru sormusten herrasta", "fi") == \
+    "https://www.opensubtitles.org/fi/search2/sublanguageid-fin/moviename-Taru+sormusten+herrasta"
+with tempfile.TemporaryDirectory() as _d:
+    (Path(_d) / "a.fi.srt").write_bytes("1\r\n00:52:10,000 --> 00:52:12,000\r\nHyvää yötä\r\n".encode("cp1252"))
+    _r = _th.tuo_tiedosto(Path(_d) / "a.fi.srt", Path(_d) / "o.srt", videon_kesto=3000, videon_fps=25)
+    assert abs(_r["kerroin"] - 0.95904) < 1e-4 and "Hyvää yötä" in (Path(_d) / "o.srt").read_text(encoding="utf-8")
+    assert _th.tuo_tiedosto(Path(_d) / "a.fi.srt", Path(_d) / "o2.srt", videon_kesto=3200, videon_fps=25)["kerroin"] == 1.0
+    (Path(_d) / "x.txt").write_text("ei")
+    try:
+        _th.tuo_tiedosto(Path(_d) / "x.txt", Path(_d) / "o3.srt")
+        raise AssertionError("ei_srt")
+    except _th.TekstiVirhe as _e:
+        assert _e.avain == "ei_srt"
 print("ajastus ja tekstihaku OK")
 
 ymp = asennus.Ymparisto()
@@ -359,6 +373,23 @@ with tempfile.TemporaryDirectory() as _kd:
     for _x in (_r, _r2):
         jono.poista(_x["id"])
 _la.lataa = _vanha_lataa
+# oma tekstitystiedosto käsittelemättömälle videolle ja sen poisto
+with tempfile.TemporaryDirectory() as _kd:
+    (Path(_kd) / "v.mkv").write_bytes(b"x" * 1000)
+    (Path(_kd) / "v.fi.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nHei\n", encoding="utf-8")
+    _tid = jono.lisaa([str(Path(_kd) / "v.mkv")])["lisatyt"][0]
+    for _ in range(50):
+        if jono._tyo(_tid)["tila"] != "analysoidaan":
+            break
+        time.sleep(0.1)
+    with jono.lukko:
+        jono._tyo(_tid)["tila"] = "odottaa"
+    _r = jono.lisaa_oma_teksti(_tid, str(Path(_kd) / "v.fi.srt"))
+    _nt = jono._tyo(_tid)["valinta"]["nettitekstit"]
+    assert _r["kieli"] == "fi" and len(_nt) == 1 and _nt[0]["kieli"] == "fin" and Path(_nt[0]["srt"]).exists(), _nt
+    jono.poista_nettiteksti(_tid, _nt[0]["file_id"])
+    assert "nettitekstit" not in jono._tyo(_tid)["valinta"]
+    jono.poista(_tid)
 # uudet asetukset siistitään; ajastus ja jälkityöt näkyvät tilassa
 jono.tallenna_asetukset({"sulje": "jotain", "puhelin_korkeus": 999, "opensubtitles_avain": "  abc  ",
                          "ajastus": {"paalla": True, "alku": "23:15", "loppu": "06:45"}})

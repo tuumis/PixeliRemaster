@@ -831,29 +831,59 @@ class Jono:
                 fps = 0.0
         fid = int(tieto["file_id"])
         r = tekstihaku.lataa(self.asetukset, fid, wd / "nettitekstit" / f"{fid}.srt", fps, tieto.get("fps"))
+        tulos = self._liita_teksti(tid, fid, r["polku"], kieli, tieto.get("nimi") or "", r["kerroin"], "OpenSubtitles")
+        return tulos | {"jaljella": r.get("jaljella"), "nollaus": r.get("nollaus")}
+
+    def lisaa_oma_teksti(self, tid, polku, kieli=None):
+        """Käyttäjän oma tekstitystiedosto (esim. selaimella OpenSubtitlesista ladattu .srt)."""
+        import hashlib
+        from fractions import Fraction
+        from . import tekstihaku
+        lahde = Path(str(polku or "").strip().strip('"'))
+        if not lahde.is_file() or lahde.suffix.lower() not in tekstihaku.TEKSTIPAATTEET:
+            raise tekstihaku.TekstiVirhe("ei_srt")
+        kieli = kieli if kieli in tekstihaku.KIELET else (tekstihaku.arvaa_kieli(lahde.name) or "fi")
+        with self.lukko:
+            t = self._tyo(tid)
+            if t["tila"] == "kasitellaan":
+                raise RuntimeError("kasittely_kaynnissa")
+            wd = self._wd(t)
+            an = t.get("analyysi") or {}
+            try:
+                fps = float(Fraction(an.get("fps") or "0")) or None
+            except (ValueError, ZeroDivisionError):
+                fps = None
+        tunnus = "oma-" + hashlib.sha1(lahde.read_bytes()).hexdigest()[:10]
+        r = tekstihaku.tuo_tiedosto(lahde, wd / "nettitekstit" / f"{tunnus}.srt", an.get("kesto"), fps)
+        tulos = self._liita_teksti(tid, tunnus, r["polku"], kieli, lahde.name, r["kerroin"], None)
+        return tulos | {"kieli": kieli}
+
+    def _liita_teksti(self, tid, tunnus, srt, kieli, nimi, kerroin, lahde):
+        """Tekstitys lopulliseen tiedostoon (käsittelemätön) tai heti valmiiseen tiedostoon."""
+        from . import tekstihaku
         k3, fi_nimi, en_nimi = tekstihaku.KIELET[kieli]
-        merkinta = {"file_id": fid, "srt": r["polku"], "kieli": k3, "nimi": str(tieto.get("nimi") or "")[:200],
-                    "otsikko": f"{fi_nimi if self.asetukset.get('kieli') != 'en' else en_nimi} (OpenSubtitles)",
-                    "kerroin": r["kerroin"]}
+        kielinimi = en_nimi if self.asetukset.get("kieli") == "en" else fi_nimi
+        merkinta = {"file_id": tunnus, "srt": srt, "kieli": k3, "nimi": str(nimi)[:200],
+                    "otsikko": f"{kielinimi} ({lahde})" if lahde else kielinimi, "kerroin": kerroin}
         with self.lukko:
             t = self._tyo(tid)
             valmis = t["tila"] == "valmis" and (t.get("tulos") or {}).get("ulos")
             if valmis:
-                tekstihaku.lisaa_valmiiseen(t["tulos"]["ulos"], r["polku"], k3, merkinta["otsikko"])
+                tekstihaku.lisaa_valmiiseen(t["tulos"]["ulos"], srt, k3, merkinta["otsikko"])
                 merkinta["valmiiseen"] = True
                 t.setdefault("tulos", {}).setdefault("nettitekstit", []).append(merkinta)
             else:
                 v = t.setdefault("valinta", {})
-                v["nettitekstit"] = [x for x in v.get("nettitekstit") or [] if x.get("file_id") != fid] + [merkinta]
+                v["nettitekstit"] = [x for x in v.get("nettitekstit") or []
+                                     if str(x.get("file_id")) != str(tunnus)] + [merkinta]
         self._tallenna()
-        return {"jaljella": r.get("jaljella"), "nollaus": r.get("nollaus"), "kerroin": r["kerroin"],
-                "valmiiseen": bool(valmis)}
+        return {"kerroin": kerroin, "valmiiseen": bool(valmis)}
 
     def poista_nettiteksti(self, tid, file_id):
         with self.lukko:
             t = self._tyo(tid)
             v = t.get("valinta") or {}
-            v["nettitekstit"] = [x for x in v.get("nettitekstit") or [] if x.get("file_id") != int(file_id)]
+            v["nettitekstit"] = [x for x in v.get("nettitekstit") or [] if str(x.get("file_id")) != str(file_id)]
             if not v["nettitekstit"]:
                 v.pop("nettitekstit")
         self._tallenna()

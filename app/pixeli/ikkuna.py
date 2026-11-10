@@ -20,6 +20,10 @@ SUODATTIMET = {
     "en": (f"Videos and images ({_VIDEO};{_KUVA})", f"Videos ({_VIDEO})", f"Images ({_KUVA})", "All files (*.*)"),
 }
 
+TEKSTISUODATIN = {"fi": ("Tekstitykset (*.srt;*.vtt;*.ass;*.ssa)", "Kaikki tiedostot (*.*)"),
+                  "en": ("Subtitles (*.srt;*.vtt;*.ass;*.ssa)", "All files (*.*)")}
+TEKSTIPAATTEET = (".srt", ".vtt", ".ass", ".ssa")
+
 SULJE_TEKSTI = {
     "fi": ("Käsittely on kesken", "Käsittely on kesken. Suljetaanko ohjelma?\n\n"
            "Videon käsittely jatkuu samasta kohdasta, kun avaat ohjelman uudelleen."),
@@ -226,6 +230,14 @@ class PywebviewIkkuna:
                     p = f.get("pywebviewFullPath")
                     if p:
                         polut.append(p)
+                tekstit = [p for p in polut if Path(p).suffix.lower() in TEKSTIPAATTEET]
+                polut = [p for p in polut if p not in tekstit]
+                if tekstit:              # tekstitystiedosto valitulle videolle (käyttöliittymä päättää)
+                    try:
+                        import json
+                        ikkuna.evaluate_js(f"window.pixeliTekstiPudotettu && window.pixeliTekstiPudotettu({json.dumps(tekstit)})")
+                    except Exception:  # noqa: BLE001
+                        pass
                 if polut:
                     tulos = self.sov.jono.lisaa(polut)
                     try:
@@ -243,10 +255,13 @@ class PywebviewIkkuna:
         except Exception as e:  # noqa: BLE001
             m.loki(f"Vedä ja pudota ei käytössä: {e}")
 
-    def valitse(self, kansio=False):
+    def valitse(self, kansio=False, tekstit=False):
         wv = self.webview
         if kansio:
             r = self.ikkuna.create_file_dialog(getattr(wv, "FOLDER_DIALOG", 20))
+        elif tekstit:
+            r = self.ikkuna.create_file_dialog(getattr(wv, "OPEN_DIALOG", 10), allow_multiple=False,
+                                               file_types=TEKSTISUODATIN.get(self.kieli(), TEKSTISUODATIN["en"]))
         else:
             r = self.ikkuna.create_file_dialog(getattr(wv, "OPEN_DIALOG", 10), allow_multiple=True,
                                                file_types=SUODATTIMET.get(self.kieli(), SUODATTIMET["en"]))

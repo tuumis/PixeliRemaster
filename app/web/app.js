@@ -755,7 +755,7 @@ function kytkeTyo(x) {
   $("#vertailu-ruutu")?.addEventListener("change", async e => { await api("valinta", {id, vertailu: e.target.checked}).catch(() => {}); hae(); });
   $("#puhelin-ruutu")?.addEventListener("change", async e => { await api("valinta", {id, puhelin: e.target.checked}).catch(() => {}); hae(); });
   $("#tekstihaku-avaa")?.addEventListener("click", () => avaaTekstihaku(id));
-  $$(".th-poista").forEach(b => b.addEventListener("click", async () => { await api("tekstihaku_poista", {id, file_id: Number(b.dataset.fid)}).catch(() => {}); hae(); }));
+  $$(".th-poista").forEach(b => b.addEventListener("click", async () => { await api("tekstihaku_poista", {id, file_id: b.dataset.fid}).catch(() => {}); hae(); }));
   $$("[data-jalki-tee]").forEach(b => b.addEventListener("click", async () => { b.disabled = true; await api("jalkityo", {id, laji: b.dataset.jalkiTee}).catch(e => ilmoita(String(e.message || e))); hae(); }));
   $$("[data-jalki-avaa]").forEach(b => b.addEventListener("click", () => api("avaa", {id, mita: "jalki", laji: b.dataset.jalkiAvaa}).catch(() => {})));
   $$("[data-jalki-kansio]").forEach(b => b.addEventListener("click", () => api("avaa", {id, mita: "jalki_kansio", laji: b.dataset.jalkiKansio}).catch(() => {})));
@@ -1139,24 +1139,31 @@ function piirraAjastus() {
 
 /* ------------------------------------------------------------ tekstitykset netistä */
 let thTila = {};
+function thApi() { return !!((TILA.jono.asetukset || {}).opensubtitles_avain || TILA.os_sisainen); }
 async function avaaTekstihaku(id) {
   const L = thTila = {id, vaihe: "tyhja"};
+  const api_ = thApi();
+  $("#th-hae").hidden = !api_;
+  $("#th-lisaa").hidden = !api_;
+  $("#th-lahde").textContent = t(api_ ? "th.lahde_api" : "th.lahde");
   $("#th-sisalto").innerHTML = "";
   $("#th-lisaa").disabled = true;
   $("#th-kieli").value = KIELI === "fi" ? "fi" : "en";
+  $("#th-kysely").value = ""; $("#th-vuosi").value = "";
   $("#tekstihaku").showModal();
   const r = await api("tekstihaku_ehdotus", {id}).catch(() => ({}));
   if (thTila !== L) return;
   $("#th-kysely").value = r.kysely || "";
   $("#th-vuosi").value = r.vuosi || "";
-  if (!(TILA.jono.asetukset || {}).opensubtitles_avain && !TILA.os_sisainen) { piirraTh({vaihe: "virhe", virhe: "avain_puuttuu"}); return; }
-  if (r.kysely) haeTekstit();
+  if (api_ && r.kysely) haeTekstit();
 }
 function piirraTh(muutos) {
   const L = Object.assign(thTila, muutos || {}), c = $("#th-sisalto");
   $("#th-lisaa").disabled = !(L.vaihe === "tulokset" && L.valittu != null);
   if (L.vaihe === "haetaan" || L.vaihe === "ladataan") {
     c.innerHTML = `<p>${t(L.vaihe === "haetaan" ? "th.haetaan" : "th.ladataan")}</p><div class="edistys epamaarainen"><i></i></div>`;
+  } else if (L.vaihe === "selain") {
+    c.innerHTML = `<p class="huomio-levy">${t("th.selain_avattu")}</p>`;
   } else if (L.vaihe === "virhe") {
     c.innerHTML = `<p class="virhe">${t("th.virhe." + (KAANNOKSET.fi["th.virhe." + L.virhe] ? L.virhe : "palvelu"), {r: esc(L.tieto || "")})}</p>`;
   } else if (L.vaihe === "tulokset") {
@@ -1172,7 +1179,7 @@ function piirraTh(muutos) {
   }
 }
 async function haeTekstit() {
-  const L = thTila; if (!L.id) return;
+  const L = thTila; if (!L.id || !thApi()) return;
   const kysely = $("#th-kysely").value.trim(); if (!kysely) return;
   piirraTh({vaihe: "haetaan", valittu: null});
   const r = await api("tekstihaku", {id: L.id, kysely, kieli: $("#th-kieli").value, vuosi: Number($("#th-vuosi").value) || null})
@@ -1180,6 +1187,13 @@ async function haeTekstit() {
   if (thTila !== L) return;
   if (r.virhe) { piirraTh({vaihe: "virhe", virhe: r.virhe, tieto: r.tieto}); return; }
   piirraTh({vaihe: "tulokset", tulokset: r.tulokset || [], valittu: (r.tulokset || []).length ? 0 : null});
+}
+function ilmoitaTeksti(r) {
+  const osat = [t(r.valmiiseen ? "th.lisatty_valmiiseen" : "th.lisatty")];
+  if (r.kerroin && Math.abs(r.kerroin - 1) > 0.001) osat.push(t("th.sovitettu"));
+  if (r.jaljella != null) osat.push(t("th.jaljella", {n: r.jaljella}));
+  ilmoita(osat.join(" "));
+  edellinenTyoAllekirjoitus = ""; hae_kerran();
 }
 async function lisaaTeksti() {
   const L = thTila; if (L.vaihe !== "tulokset" || L.valittu == null) return;
@@ -1189,12 +1203,29 @@ async function lisaaTeksti() {
   if (thTila !== L) return;
   if (r.virhe) { piirraTh({vaihe: "virhe", virhe: r.virhe, tieto: r.tieto}); return; }
   $("#tekstihaku").close();
-  const osat = [t(r.valmiiseen ? "th.lisatty_valmiiseen" : "th.lisatty")];
-  if (r.kerroin && Math.abs(r.kerroin - 1) > 0.001) osat.push(t("th.sovitettu"));
-  if (r.jaljella != null) osat.push(t("th.jaljella", {n: r.jaljella}));
-  ilmoita(osat.join(" "));
-  edellinenTyoAllekirjoitus = ""; hae_kerran();
+  ilmoitaTeksti(r);
 }
+async function lisaaOmaTeksti(id, polku, kieli) {
+  const auki = $("#tekstihaku").open && thTila.id === id;
+  if (auki) piirraTh({vaihe: "ladataan"});
+  const r = await api("tekstihaku_oma", {id, polku, kieli: kieli || null}).catch(e => ({virhe: "palvelu", tieto: String(e.message || e)}));
+  if (r.virhe) {
+    if (auki) piirraTh({vaihe: "virhe", virhe: r.virhe, tieto: r.tieto});
+    else ilmoita(t("th.virhe." + (KAANNOKSET.fi["th.virhe." + r.virhe] ? r.virhe : "palvelu"), {r: ""}));
+    return;
+  }
+  if (auki) $("#tekstihaku").close();
+  ilmoitaTeksti(r);
+}
+// tekstitystiedosto pudotettu ikkunaan: avoimen tekstitysikkunan videolle, muuten valitulle videolle
+window.pixeliTekstiPudotettu = polut => {
+  const auki = $("#tekstihaku").open && thTila.id;
+  const id = auki ? thTila.id : valittu;
+  const x = (TILA.jono.tyot || []).find(y => y.id === id);
+  if (!x || onKuva(x) || !x.analyysi || x.tila === "kasitellaan") { ilmoita(t("th.valitse_video")); return; }
+  const kieli = auki ? $("#th-kieli").value : null;
+  for (const p of polut) lisaaOmaTeksti(id, p, kieli);
+};
 
 /* ------------------------------------------------------------ työkalut (asetuksissa) */
 let tyokaluVersiot = null;
@@ -1313,7 +1344,17 @@ function kytkeAsetukset() {
     $("#ajastus").close(); hae_kerran();
   });
   $("#th-hae").addEventListener("click", haeTekstit);
-  $("#th-kysely").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); haeTekstit(); } });
+  $("#th-kysely").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); if (thApi()) haeTekstit(); else $("#th-selain").click(); } });
+  $("#th-selain").addEventListener("click", async () => {
+    await api("tekstihaku_selain", {kysely: $("#th-kysely").value.trim(), kieli: $("#th-kieli").value}).catch(() => null);
+    piirraTh({vaihe: "selain"});
+  });
+  $("#th-tiedosto").addEventListener("click", async () => {
+    const L = thTila; if (!L.id) return;
+    const r = await api("valitse", {laji: "teksti"}).catch(() => ({}));
+    if (thTila !== L || !(r.polut || []).length) return;
+    lisaaOmaTeksti(L.id, r.polut[0], $("#th-kieli").value);
+  });
   $("#th-lisaa").addEventListener("click", lisaaTeksti);
   $("#paivitys-nappi").addEventListener("click", avaaPaivitys);
   $("#lisaa-levy").addEventListener("click", avaaLevy);

@@ -87,6 +87,9 @@ class Sovellus:
             return j.lisaa(d.get("polut") or [])
         if polku == "valinta_kaikkiin":
             return {"n": j.valinta_kaikkiin(d["id"])}
+        if polku == "valitse" and d.get("laji") == "teksti":
+            polut = self.ikkuna.valitse(False, tekstit=True) if self.ikkuna and hasattr(self.ikkuna, "valitse") else []
+            return {"polut": polut}
         if polku == "valitse":
             kansio = d.get("laji") in ("kansio", "lisaa_kansio")
             if self.ikkuna and hasattr(self.ikkuna, "valitse"):
@@ -166,6 +169,15 @@ class Sovellus:
             return j.jalkityo(d["id"], d.get("laji"))
         if polku == "tekstihaku_ehdotus":
             return j.tekstihaku_ehdotus(d["id"])
+        if polku == "tekstihaku_oma":
+            try:
+                return j.lisaa_oma_teksti(d["id"], d.get("polku") or "", d.get("kieli"))
+            except tekstihaku.TekstiVirhe as e:
+                return {"virhe": e.avain, "tieto": e.tieto}
+        if polku == "tekstihaku_selain":
+            kieli = j.asetukset.get("kieli") if j.asetukset.get("kieli") in ("fi", "en") else self.kieli_jarjestelma
+            asennus.avaa_tiedosto(tekstihaku.hakusivu(d.get("kysely") or "", d.get("kieli") or "fi", kieli))
+            return {}
         if polku in ("tekstihaku", "tekstihaku_lisaa"):
             from . import tekstihaku
             try:

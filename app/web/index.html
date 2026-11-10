@@ -172,17 +172,22 @@
 <dialog id="tekstihaku" class="dialogi">
   <form method="dialog" class="dialogi-sisalto">
     <h2 data-t="th.otsikko"></h2>
+    <p data-t="th.ohje"></p>
     <div class="linkki-rivi">
       <input type="text" id="th-kysely" autocomplete="off" spellcheck="false" data-t-placeholder="th.paikka">
       <input type="number" id="th-vuosi" min="1900" max="2100" class="th-vuosi" data-t-placeholder="th.vuosi">
       <select id="th-kieli"><option value="fi">Suomi</option><option value="en">English</option><option value="sv">Svenska</option></select>
-      <button class="painike toissijainen" type="button" id="th-hae" data-t="linkki.hae"></button>
+    </div>
+    <div class="th-napit">
+      <button class="painike toissijainen" type="button" id="th-selain" data-t="th.selain"></button>
+      <button class="painike toissijainen" type="button" id="th-tiedosto" data-t="th.tiedosto"></button>
+      <button class="painike toissijainen" type="button" id="th-hae" data-t="th.hae_api" hidden></button>
     </div>
     <div id="th-sisalto" class="th-sisalto"></div>
-    <p class="linkki-oikeudet"><small data-t="th.lahde"></small></p>
+    <p class="linkki-oikeudet"><small id="th-lahde"></small></p>
     <div class="toiminnot">
       <button class="painike haamu" value="peru" data-t="yleinen.peruuta"></button>
-      <button class="painike ensisijainen" type="button" id="th-lisaa" data-t="th.lisaa" disabled></button>
+      <button class="painike ensisijainen" type="button" id="th-lisaa" data-t="th.lisaa" hidden disabled></button>
     </div>
   </form>
 </dialog>

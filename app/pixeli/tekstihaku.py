@@ -5,7 +5,9 @@ ladataan SRT:nä ja lisätään lopulliseen tiedostoon omaksi raidakseen. Jos te
 nopeuksiseen julkaisuun (esim. 23,976 fps elokuva ja 25 fps PAL-DVD, joka toistuu 4 % nopeammin), ajat
 sovitetaan automaattisesti.
 
-Rajapinta vaatii sovellusavaimen (Api-Key). Lataukset ilman kirjautumista: 5 / vuorokausi / IP-osoite.
+Rajapinta vaatii sovellusavaimen (Api-Key), joka voi olla maksullinen. Ilman avainta tekstitys lisätään
+tiedostosta: hakusivu avataan selaimeen valmiiksi elokuvan nimellä, ja käyttäjän lataama .srt (tai .vtt,
+.ass, .ssa) tuodaan samalla tavalla kuin rajapinnasta haettu.
 """
 import json
 import os
@@ -259,3 +261,65 @@ def lisaa_valmiiseen(ulos, srt, kieli3, otsikko, oletus=True):
             time.sleep(0.5)
     tmp.unlink(missing_ok=True)
     raise TekstiVirhe("tiedosto_kaytossa")
+
+
+TEKSTIPAATTEET = (".srt", ".vtt", ".ass", ".ssa")
+HAKUSIVU = "https://www.opensubtitles.org/{ui}/search2/sublanguageid-{k3}/moviename-{q}"
+
+
+def hakusivu(kysely, kieli="fi", ui="fi"):
+    """OpenSubtitlesin hakusivu selaimeen (ei vaadi avainta)."""
+    k3 = KIELET.get(kieli, KIELET["fi"])[0]
+    q = urllib.parse.quote_plus(str(kysely or "").strip())
+    return HAKUSIVU.format(ui="fi" if ui == "fi" else "en", k3=k3, q=q)
+
+
+def arvaa_kieli(nimi):
+    """Tiedostonimestä kieli: 'Elokuva.fi.srt', 'Elokuva_FIN.srt', 'Elokuva (Finnish).srt' -> 'fi'."""
+    sanat = set(re.split(r"[^a-zåäö]+", Path(str(nimi)).stem.lower()))
+    for kieli, tunnukset in (("fi", {"fi", "fin", "finnish", "suomi", "suomeksi"}),
+                             ("sv", {"sv", "swe", "swedish", "svenska", "ruotsi"}),
+                             ("en", {"en", "eng", "english", "englanti"})):
+        if sanat & tunnukset:
+            return kieli
+    return None
+
+
+def viimeinen_aika(teksti):
+    ajat = [_sek(r) for r in _AIKA.finditer(teksti)]
+    return max(ajat) if ajat else 0.0
+
+
+def tuo_tiedosto(lahde, kohde, videon_kesto=None, videon_fps=None):
+    """Käyttäjän tekstitystiedosto UTF-8-SRT:ksi. Jos tekstitys on selvästi videota pidempi samassa
+    suhteessa kuin elokuvan ja PAL-DVD:n nopeusero (25 / 23,976 = 1,043), ajat sovitetaan."""
+    lahde, kohde = Path(lahde), Path(kohde)
+    if lahde.suffix.lower() not in TEKSTIPAATTEET or not lahde.is_file():
+        raise TekstiVirhe("ei_srt")
+    if lahde.suffix.lower() == ".srt":
+        teksti = _dekoodaa(lahde.read_bytes())
+    else:
+        tmp = kohde.with_suffix(".muunnos.srt")
+        kohde.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([m.ffbin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", str(lahde),
+                            "-c:s", "srt", str(tmp)], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", creationflags=m.PIILOTA)
+        if r.returncode != 0 or not tmp.exists():
+            raise TekstiVirhe("ei_srt", r.stderr[-300:])
+        teksti = _dekoodaa(tmp.read_bytes())
+        tmp.unlink(missing_ok=True)
+    teksti = teksti.replace("\r\n", "\n").lstrip("\ufeff")
+    if not _AIKA.search(teksti):
+        raise TekstiVirhe("ei_srt")
+    kerroin = 1.0
+    try:
+        kesto, loppu = float(videon_kesto or 0), viimeinen_aika(teksti)
+        pal = videon_fps is None or abs(float(videon_fps) - 25) < 0.1 or abs(float(videon_fps) - 50) < 0.1
+        if kesto > 300 and pal and 1.025 < loppu / kesto < 1.06:
+            kerroin = 23.976 / 25.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
+    teksti = sovita_srt(teksti, kerroin)
+    kohde.parent.mkdir(parents=True, exist_ok=True)
+    kohde.write_text(teksti, encoding="utf-8")
+    return {"polku": str(kohde), "kerroin": kerroin}
