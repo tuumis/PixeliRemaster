@@ -1,3 +1,6 @@
+**Korjattu 1.14.3:** Esikatselu epäonnistui DVD-videoilla, koska Terävin-asetuksen monikuvamalli ei mahtunut näytönohjaimen muistiin. Mallin raskain vaihe lasketaan nyt osissa (sama tulos, selvästi vähemmän muistia), ja laskentaikkuna pienenee itsestään, jos muisti silti loppuu. Jos yksittäistä asetusta ei voi esikatsella, muut näkyvät silti.
+**Fixed in 1.14.3:** The preview failed on DVD videos because the Sharpest preset's multi-frame model didn't fit in graphics memory. The model's heaviest stage is now computed in parts (same result, much less memory), and the processing window shrinks automatically if memory still runs out. If one preset can't be previewed, the others are still shown.
+
 **Korjattu 1.14.2:** Lisää tekstitys → Etsi selaimessa ei avannut selainta. Jos selainta ei voida avata, ohjelma kertoo sen.
 **Fixed in 1.14.2:** Add subtitles → Search in browser didn't open the browser. If the browser can't be opened, the program now says so.
 

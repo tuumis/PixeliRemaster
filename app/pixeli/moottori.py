@@ -24,7 +24,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.14.2"
+VERSIO = "1.14.3"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -1569,7 +1569,6 @@ class _OcrTyo:
 
 
 def traceback_teksti():
-    import traceback
     return traceback.format_exc()[-1500:]
 
 
