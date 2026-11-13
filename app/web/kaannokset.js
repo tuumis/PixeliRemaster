@@ -331,6 +331,7 @@ fi: {
   "vertailu.vihje_jakaja": "Vedä jakajaa kuvan päällä.",
   "vertailu.vihje_vuoro": "Napsauta kuvaa tai paina välilyöntiä vaihtaaksesi.",
   "vertailu.saadot_lappu": "{n} (säädetty)",
+  "vertailu.ei_esikatselua": "{n}: ei esikatselua (näytönohjaimen muisti ei riittänyt)",
 
   "asetus.otsikko": "Asetus",
   "asetus.1": "Alkuperäinen",
@@ -826,6 +827,7 @@ en: {
   "vertailu.vihje_jakaja": "Drag the divider over the picture.",
   "vertailu.vihje_vuoro": "Click the picture or press space to switch.",
   "vertailu.saadot_lappu": "{n} (adjusted)",
+  "vertailu.ei_esikatselua": "{n}: no preview (the graphics card ran out of memory)",
 
   "asetus.otsikko": "Preset",
   "asetus.1": "Original",

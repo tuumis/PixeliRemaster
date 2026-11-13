@@ -377,11 +377,44 @@ rb.eval()
 kuvat_v = [np.roll(m.testikuva(64, 96), (k, 2 * k), (2, 3)) for k in range(4)]
 viite_r = rb(torch.from_numpy(np.stack(kuvat_v, 1))).numpy()[0]
 sd_r = kuva.lataa_pth(vk)
-for nimi_, ops_ in (("torch", ot), ("numpy", on)):
-    oma = vs.RealBasicVSR(ops_, sd_r)([ops_.tensor(x) for x in kuvat_v])
+for nimi_, ops_, raita_ in (("torch", ot, None), ("numpy", on, None), ("torch kaistoina", ot, 5),
+                            ("numpy kaistoina", on, 3)):
+    vsr_ = vs.RealBasicVSR(ops_, sd_r)
+    vsr_.raita = raita_          # 4x-loppuosa kaistoittain (muistin säästö) antaa saman tuloksen
+    oma = vsr_([ops_.tensor(x) for x in kuvat_v])
     e = max(float(np.abs(ops_.numpy(a_)[0] - viite_r[i]).max()) for i, a_ in enumerate(oma))
     print(f"::notice title=torchtesti::RealBasicVSR {nimi_}: suurin ero {e:.2e} (alkuperäinen)")
     assert e < 2e-3, e
+
+
+# muisti loppuu kesken: ikkuna puolittuu ja kaikki kuvat valmistuvat silti järjestyksessä
+class _Ahne:
+    def __init__(self):
+        self.kutsut = []
+
+    def _h(self, x):
+        return x
+
+    def __call__(self, lrs, kasittele=None):
+        self.kutsut.append(len(lrs))
+        if len(lrs) > 20:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 796.00 MiB")
+        for i, x in enumerate(lrs):
+            kasittele(i, np.repeat(np.repeat(x, 4, 2), 4, 3))
+
+
+ahne = _Ahne()
+mk = vs.MonikuvaKetju(on, 16, 24, 64, 96, {"monikuva": ahne, "ai": 1.0, "rae": 0.0}, yuv=False)
+ulos = []
+for i in range(60):
+    x = np.full((1, 3, 16, 24), (i % 50) / 100, np.float32)
+    y = mk.syota(x)
+    if y is not None:
+        ulos += [float(y[j, 0, 0, 0]) for j in range(y.shape[0])]
+y = mk.loppu()
+ulos += [float(y[j, 0, 0, 0]) for j in range(y.shape[0])] if y is not None else []
+assert len(ulos) == 60 and mk.ikkuna < vs.IKKUNA and ahne.kutsut[-1] <= 20, (len(ulos), mk.ikkuna, ahne.kutsut)
+print(f"::notice title=torchtesti::monikuvaketju muistin loppuessa: ikkuna {vs.IKKUNA} -> {mk.ikkuna}")
 
 
 # monikuvaketju: kaikki kuvat järjestyksessä täsmälleen kerran, myös kohtauksen vaihtuessa

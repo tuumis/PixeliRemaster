@@ -1259,6 +1259,7 @@ class Jono:
                     with self.lukko:
                         t["koe"] = {"tila": "valmis", "tunniste": tiedot["tunniste"],
                                     "nopeus": {str(k): v for k, v in tiedot["nopeus"].items()},
+                                    "puuttuvat": [int(n) for n in tiedot.get("puuttuvat") or []],
                                     "mittaus": tiedot.get("mittaus"), "kuvaus": tiedot.get("kuvaus"),
                                     "oletukset": tiedot.get("oletukset"), "kohdat": tiedot.get("kohdat"),
                                     "vaihtelee": tiedot.get("vaihtelee", False),

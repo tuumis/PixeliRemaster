@@ -652,6 +652,11 @@ function paivitaKuvat(x, viive = 0) {
   $("#lappu-o").textContent = saatoPoikkeaa(x, n, nk.saato) ? t("vertailu.saadot_lappu", {n: asetusNimi(x, n)}) : asetusNimi(x, n);
   $("#lappu-v").classList.toggle("nyt", nk.tila === "vuoro" && !nk.oikea);
   $("#lappu-o").classList.toggle("nyt", nk.tila === "vuoro" && nk.oikea);
+  if ((k.puuttuvat || []).includes(n)) {      // asetusta ei voitu esikatsella (esim. muisti ei riittänyt)
+    o.src = v.src;
+    $("#lappu-o").textContent = t("vertailu.ei_esikatselua", {n: asetusNimi(x, n)});
+    return;
+  }
   if (!saatoPoikkeaa(x, n, nk.saato)) { o.src = media(x.id, `koe_${k.tunniste}/v${n}_k${nk.kohta}.png`, tun); return; }
   const avain = JSON.stringify([n, nk.saato, nk.kohta, k.versio || 0]);
   if (nk.saatoUrl[avain]) { o.src = media(x.id, nk.saatoUrl[avain], tun); return; }

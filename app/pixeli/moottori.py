@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import zlib
 from fractions import Fraction
 from pathlib import Path
@@ -1327,32 +1328,46 @@ def koekuvat(src, an, geo, wd, L, edistys=None, peruuta=None):
     kuvat = lahdekuvat(src, an, geo, kd)
     ol = mt["oletukset"]
     nopeus = {}
+    puuttuvat = []
     vaiheet = len(ASETUKSET) * len(kuvat)
     tehty = 0
     for n in ASETUKSET:
-        with L.lukko:
-            ketju = L.ketju(geo, n, ol.get(str(n)), an)
-            ajat = []
-            with L.inferenssi():
-                for i, k in enumerate(kuvat, 1):
-                    if peruuta is not None and peruuta.is_set():
-                        raise Peruutettu()
-                    t = time.time()
-                    rgb, maara = esikatselukuva(L, ketju, kd, i, k, 1000 * i)
-                    out = L.ops.pakkaa(*ketju.yuv420p10(rgb))   # mukaan nopeusmittaukseen
-                    del out
-                    # monikuvamalli: sarja lasketaan kerralla; käsittelyssä ikkunan reunoilla on kontekstia
-                    ajat.append((time.time() - t) / maara * (1.0 if maara == 1 else 1.35))
-                    rgb_png(kd / f"v{n}_k{i}.png", L.ops.numpy(rgb)[0])
-                    tehty += 1
-                    if edistys:
-                        edistys(tehty, vaiheet)
-            del ketju
-            if n != 1:
-                L.vapauta()
+        ajat = []
+        try:
+            with L.lukko:
+                ketju = L.ketju(geo, n, ol.get(str(n)), an)
+                with L.inferenssi():
+                    for i, k in enumerate(kuvat, 1):
+                        if peruuta is not None and peruuta.is_set():
+                            raise Peruutettu()
+                        t = time.time()
+                        rgb, maara = esikatselukuva(L, ketju, kd, i, k, 1000 * i)
+                        out = L.ops.pakkaa(*ketju.yuv420p10(rgb))   # mukaan nopeusmittaukseen
+                        del out
+                        # monikuvamalli: sarja lasketaan kerralla; käsittelyssä ikkunan reunoilla on kontekstia
+                        ajat.append((time.time() - t) / maara * (1.0 if maara == 1 else 1.35))
+                        rgb_png(kd / f"v{n}_k{i}.png", L.ops.numpy(rgb)[0])
+                        tehty += 1
+                        if edistys:
+                            edistys(tehty, vaiheet)
+                del ketju
+                if n != 1:
+                    L.vapauta()
+        except Peruutettu:
+            raise
+        except Exception:  # noqa: BLE001
+            # yksi asetus (esim. raskas monikuvamalli pienellä näytönohjaimella) ei kaada koko esikatselua
+            loki(f"Esikatselu asetuksella {n} epäonnistui: {traceback.format_exc()}")
+            puuttuvat.append(n)
+            tehty += len(kuvat) - len(ajat)
+            ketju = rgb = None
+            L.vapauta()
+            continue
         mitattu = min(ajat[1:]) if len(ajat) > 1 else ajat[0]
         nopeus[n] = round(1.0 / max(mitattu, 1e-4), 2)
-    tiedot = {"tunniste": tun, "nopeus": nopeus, "aika": time.time(), "mittaus": mt["mittaus"],
+    if len(puuttuvat) == len(ASETUKSET):
+        raise RuntimeError("esikatselu_epaonnistui")
+    tiedot = {"tunniste": tun, "nopeus": nopeus, "puuttuvat": puuttuvat, "aika": time.time(), "mittaus": mt["mittaus"],
               "kuvaus": mt["kuvaus"], "oletukset": ol, "vaihtelee": mt.get("vaihtelee", False),
               "piirretty": mt.get("piirretty", False), "kohdat": kohtatiedot(src, an, geo, kd)}
     kirjoita_json(kd / "koe.json", tiedot)
@@ -1384,14 +1399,19 @@ def siirra_kohta(src, an, geo, wd, L, k, aika, edistys=None):
     kuvat = lahdekuvat(src, an, geo, kd)
     ol = mt["oletukset"]
     for j, n in enumerate(ASETUKSET, 1):
-        with L.lukko:
-            ketju = L.ketju(geo, n, ol.get(str(n)), an)
-            with L.inferenssi():
-                rgb, _ = esikatselukuva(L, ketju, kd, k, kuvat[k - 1], 1000 * k)
-                rgb_png(kd / f"v{n}_k{k}.png", L.ops.numpy(rgb)[0])
-            del ketju, rgb
-            if n != 1:
-                L.vapauta()
+        try:
+            with L.lukko:
+                ketju = L.ketju(geo, n, ol.get(str(n)), an)
+                with L.inferenssi():
+                    rgb, _ = esikatselukuva(L, ketju, kd, k, kuvat[k - 1], 1000 * k)
+                    rgb_png(kd / f"v{n}_k{k}.png", L.ops.numpy(rgb)[0])
+                del ketju, rgb
+                if n != 1:
+                    L.vapauta()
+        except Exception:  # noqa: BLE001
+            loki(f"Esikatselukohta asetuksella {n} epäonnistui: {traceback.format_exc()}")
+            ketju = rgb = None
+            L.vapauta()
         if edistys:
             edistys(j, len(ASETUKSET))
     tiedot = lue_json(kd / "koe.json", {}) or {}

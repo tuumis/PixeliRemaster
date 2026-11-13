@@ -128,12 +128,19 @@ class RealBasicVSR:
         self.mid = int(sd[q + "fusion.weight"].shape[0])
         self.mat = _Mat(o)
         self.puoli = False
+        self.raita = None        # 4x-loppuosan kaistan korkeus (1x-riveinä); None = automaattinen
 
     def puolita(self):
         if getattr(self.o, "ht", False):
             for k in ("puhd", "puhd_ulos", "taakse", "eteen", "fusion", "up1", "up2", "hr", "last"):
                 setattr(self, k, _puolita(getattr(self, k)))
             self.puoli = True
+
+    def _raita(self, h, w):
+        """Kaistan korkeus: 64 kanavan 4x-välitulos enintään noin 160 Mt (fp16)."""
+        if self.raita:
+            return max(1, int(self.raita))
+        return max(16, min(h, int(160e6 / (64 * 16 * max(1, w) * 2))))
 
     def _h(self, x):
         return self.o.half(x) if self.puoli else self.o.float(x)
@@ -161,23 +168,48 @@ class RealBasicVSR:
             tal[i] = f
         f = o.zeros(f.shape, f)
         Wy, Wx = self.mat(h, 4 * h, False), self.mat(w, 4 * w, False)
+        raita = self._raita(h, w)
         tulos = []
         for i in range(t):
             if i > 0:
                 f = o.warp(f, eteen_v[i - 1])
             f = _aja_res(o, self.eteen, o.cat([x_in[i], f]))
-            y = o.leaky(o.conv2d(o.cat([tal[i], f]), *self.fusion, 0), 0.1)
+            z = o.cat([tal[i], f])
             tal[i] = None
-            y = o.leaky(o.pixel_shuffle(o.conv2d(y, *self.up1, 1), 2), 0.1)
-            y = o.leaky(o.pixel_shuffle(o.conv2d(y, *self.up2, 1), 2), 0.1)
-            y = o.leaky(o.conv2d(y, *self.hr, 1), 0.1)
-            y = o.float(o.conv2d(y, *self.last, 1)) + o.matresize(puhtaat[i], Wy, Wx)
+            y = o.matresize(puhtaat[i], Wy, Wx)
+            # 4x-loppuosa kaistoittain: täysikokoiset 64-kanavaiset 4x-välitulokset veisivät DVD-kuvalla
+            # lähes gigatavun kukin. Kaistojen reunoille 4 riviä päällekkäisyyttä (vaikutusalue < 2 riviä),
+            # joten tulos on sama kuin kerralla laskettuna.
+            for r0 in range(0, h, raita):
+                r1 = min(h, r0 + raita)
+                a0, a1 = max(0, r0 - 4), min(h, r1 + 4)
+                v = o.leaky(o.conv2d(z[:, :, a0:a1], *self.fusion, 0), 0.1)
+                v = o.leaky(o.pixel_shuffle(o.conv2d(v, *self.up1, 1), 2), 0.1)
+                v = o.leaky(o.pixel_shuffle(o.conv2d(v, *self.up2, 1), 2), 0.1)
+                v = o.leaky(o.conv2d(v, *self.hr, 1), 0.1)
+                v = o.float(o.conv2d(v, *self.last, 1))
+                y[:, :, 4 * r0:4 * r1] += v[:, :, 4 * (r0 - a0):4 * (r1 - a0)]
+                del v
+            del z
             if kasittele:
                 kasittele(i, y)
             else:
                 tulos.append(y)
             del y
         return tulos
+
+
+def _muisti_loppui(e):
+    return type(e).__name__ == "OutOfMemoryError" or "out of memory" in str(e).lower()
+
+
+def _vapauta_muisti():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ------------------------------------------------------------------ käsittelyketju
@@ -207,6 +239,7 @@ class MonikuvaKetju:
         self.Wx_l = o.param(kuva.skaalausmatriisi(w, max(8, w // k), "mitchell"))
         self.palaute = None
         self.pala_raja = None
+        self.ikkuna = IKKUNA             # pienenee, jos näytönohjaimen muisti ei riitä
         self.alku = 0                    # ensimmäisen syötetyn kuvan numero (rakeen siemen)
         self.nollaa()
 
@@ -244,6 +277,19 @@ class MonikuvaKetju:
         return self.jalki.rgb_lopullinen(o.clamp(x4, 0.0, 1.0), self.alku + i)
 
     def _laske(self, a, b):
+        """Laskee kuvat a..b-1; jos näytönohjaimen muisti loppuu, ikkuna puolitetaan ja yritetään
+        uudelleen (kutsujat jatkavat siitä, mihin annettu jäi)."""
+        b = min(b, a + self.ikkuna)
+        try:
+            return self._laske_ikkuna(a, b)
+        except Exception as e:  # noqa: BLE001
+            if not _muisti_loppui(e) or self.ikkuna <= 4:
+                raise
+            self.ikkuna = max(4, self.ikkuna // 2)
+            _vapauta_muisti()
+            return self._laske(a, b)
+
+    def _laske_ikkuna(self, a, b):
         """Laskee kuvat a..b-1 nykyisestä kohtauksesta (konteksti molemmin puolin)."""
         loppu = self.j0 + len(self.jakso)
         alku = max(self.seg0, self.j0, a - KONTEKSTI)
@@ -267,7 +313,7 @@ class MonikuvaKetju:
         tulos = []
         loppu = self.j0 + len(self.jakso)
         while self.annettu < loppu:
-            tulos += self._laske(self.annettu, min(loppu, self.annettu + IKKUNA))
+            tulos += self._laske(self.annettu, min(loppu, self.annettu + self.ikkuna))
         return tulos
 
     def syota(self, xb):
@@ -284,8 +330,8 @@ class MonikuvaKetju:
                 self.leikkauksia += 1
             self.jakso.append((self.net._h(x), x if self.ai < 1.0 else None))
             self.saatu += 1
-            while self.j0 + len(self.jakso) - self.annettu >= IKKUNA + KONTEKSTI:
-                valmiit += self._laske(self.annettu, self.annettu + IKKUNA)
+            while self.j0 + len(self.jakso) - self.annettu >= self.ikkuna + KONTEKSTI:
+                valmiit += self._laske(self.annettu, self.annettu + self.ikkuna)
         return o.cat_n(valmiit) if valmiit else None
 
     def loppu(self):
