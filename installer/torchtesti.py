@@ -397,6 +397,8 @@ class _Ahne:
 
     def __call__(self, lrs, kasittele=None):
         self.kutsut.append(len(lrs))
+        # uusi yritys ei saa tapahtua edellisen muistivirheen käsittelyn sisällä (välitulokset muistissa)
+        assert sys.exc_info()[0] is None, "uusi yritys except-lohkon sisällä"
         if len(lrs) > 20:
             raise RuntimeError("CUDA out of memory. Tried to allocate 796.00 MiB")
         for i, x in enumerate(lrs):

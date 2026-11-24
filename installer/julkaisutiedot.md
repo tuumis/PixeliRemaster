@@ -1,3 +1,6 @@
+**Korjattu 1.14.4:** Aloitusnäkymä tuli joka käynnistyksessä, koska päivityksen jälkeinen itsetesti keskeytyi Terävin-asetuksen muistivirheeseen. Itsetesti valmistuu nyt aina, ja monikuvamallin muistinsäästö toimii oikein (uusi yritys vapauttaa edellisen yrityksen muistin).
+**Fixed in 1.14.4:** The startup screen appeared on every launch because the post-update self-test stopped on a memory error in the Sharpest preset. The self-test now always completes, and the multi-frame model's memory saving works correctly (a retry frees the previous attempt's memory).
+
 **Korjattu 1.14.3:** Esikatselu epäonnistui DVD-videoilla, koska Terävin-asetuksen monikuvamalli ei mahtunut näytönohjaimen muistiin. Mallin raskain vaihe lasketaan nyt osissa (sama tulos, selvästi vähemmän muistia), ja laskentaikkuna pienenee itsestään, jos muisti silti loppuu. Jos yksittäistä asetusta ei voi esikatsella, muut näkyvät silti.
 **Fixed in 1.14.3:** The preview failed on DVD videos because the Sharpest preset's multi-frame model didn't fit in graphics memory. The model's heaviest stage is now computed in parts (same result, much less memory), and the processing window shrinks automatically if memory still runs out. If one preset can't be previewed, the others are still shown.
 

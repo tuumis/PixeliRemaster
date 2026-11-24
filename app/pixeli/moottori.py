@@ -24,7 +24,7 @@ import numpy as np
 
 from . import kuva
 
-VERSIO = "1.14.3"
+VERSIO = "1.14.4"
 SOVELLUS = Path(__file__).resolve().parent.parent          # app-kansio
 MALLIT = SOVELLUS / "mallit"
 
@@ -801,6 +801,21 @@ def itsetesti(edistys=None):
         if edistys:
             edistys("nopeus", n, len(ASETUKSET))
     from . import lisamallit
+    try:
+        _mittaa_lisamallit(L, tulos, lisamallit)
+    except Exception:  # noqa: BLE001
+        # lisämallien nopeus on vain arvio-apu: sen epäonnistuminen (esim. näytönohjaimen muisti)
+        # ei saa jättää itsetestiä keskeneräiseksi (muuten aloitusnäkymä tulisi joka käynnistyksessä)
+        loki(f"Lisämallien nopeusmittaus epäonnistui: {traceback.format_exc()}")
+        tulos.setdefault("huomiot", []).append("lisamallien_nopeus")
+    L.vapauta()
+    tulos["valmis"] = True
+    kirjoita_json(DATA / "itsetesti.json", tulos)
+    return tulos
+
+
+def _mittaa_lisamallit(L, tulos, lisamallit):
+    import torch
     if lisamallit.polku("kohina"):
         D = L.kohinamalli()
         xb = L.ops.tensor(np.repeat(testikuva(576, 720), 2, axis=0))
@@ -813,6 +828,8 @@ def itsetesti(edistys=None):
                 D(xb, 8.0)
             torch.cuda.synchronize()
         tulos["nopeus"]["kohina"] = round(8 / (time.time() - t), 1)
+        del D, xb
+    L.vapauta()                                   # monikuvamalli tarvitsee näytönohjaimen muistin itselleen
     if lisamallit.polku("monikuva"):
         n6 = next(n for n, a in ASETUKSET.items() if a.get("malli") == "monikuva")
         from .vsr import IKKUNA, KONTEKSTI
@@ -837,10 +854,6 @@ def itsetesti(edistys=None):
         suhde = (maara + KONTEKSTI) / maara / ((IKKUNA + 2 * KONTEKSTI) / IKKUNA)
         tulos["nopeus"][str(n6)] = round(maara / (time.time() - t) * suhde, 2)
         del k
-    L.vapauta()
-    tulos["valmis"] = True
-    kirjoita_json(DATA / "itsetesti.json", tulos)
-    return tulos
 
 
 

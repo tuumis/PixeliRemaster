@@ -204,10 +204,26 @@ def _muisti_loppui(e):
 
 
 def _vapauta_muisti():
+    import gc
+    gc.collect()
     try:
         import torch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _kirjaa_muisti(viesti):
+    """Lokiin näytönohjaimen muistitilanne (vapaa / PyTorchin varaama), vianetsintää varten."""
+    try:
+        import torch
+        from . import moottori
+        if torch.cuda.is_available():
+            vapaa, kaikki = torch.cuda.mem_get_info()
+            viesti += (f" (vapaana {vapaa / 2**30:.2f} / {kaikki / 2**30:.2f} GiB, PyTorch varannut "
+                       f"{torch.cuda.memory_reserved() / 2**30:.2f} GiB)")
+        moottori.loki(viesti)
     except Exception:  # noqa: BLE001
         pass
 
@@ -279,15 +295,18 @@ class MonikuvaKetju:
     def _laske(self, a, b):
         """Laskee kuvat a..b-1; jos näytönohjaimen muisti loppuu, ikkuna puolitetaan ja yritetään
         uudelleen (kutsujat jatkavat siitä, mihin annettu jäi)."""
-        b = min(b, a + self.ikkuna)
-        try:
-            return self._laske_ikkuna(a, b)
-        except Exception as e:  # noqa: BLE001
-            if not _muisti_loppui(e) or self.ikkuna <= 4:
-                raise
+        while True:
+            b = min(b, a + self.ikkuna)
+            try:
+                return self._laske_ikkuna(a, b)
+            except Exception as e:  # noqa: BLE001
+                if not _muisti_loppui(e) or self.ikkuna <= 4:
+                    raise
+            # Uusi yritys vasta except-lohkon jälkeen: poikkeuksen jäljitys pitää muuten epäonnistuneen
+            # yrityksen välitulokset (jopa gigatavuja) muistissa, ja pienempikin ikkuna loppuisi kesken.
             self.ikkuna = max(4, self.ikkuna // 2)
             _vapauta_muisti()
-            return self._laske(a, b)
+            _kirjaa_muisti(f"Monikuvamallin muisti loppui: ikkuna pienennetään {self.ikkuna} kuvaan")
 
     def _laske_ikkuna(self, a, b):
         """Laskee kuvat a..b-1 nykyisestä kohtauksesta (konteksti molemmin puolin)."""
